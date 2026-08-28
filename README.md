@@ -59,6 +59,14 @@ python -m compileall -q coding/python
 python coding/python/order_decoupling_grayscale.py --mat-file input/grayscale_image.mat --output-dir output/smoke_test --epochs 1 --device cpu
 ```
 
+固定物理前向回归验证：
+
+```powershell
+python tests/test_physical_forward.py
+```
+
+该测试使用独立的 NumPy 参考实现，对固定随机 `dx/dy` 的 23 个通道逐值比对，并检查 Parseval 能量关系和共享通道级次配置。
+
 输出目录必须是尚不存在的新目录。完整优化默认 30000 轮，运行时间和显存/内存占用明显高于快速验证。
 
 辅助脚本：
@@ -93,6 +101,6 @@ MAT 输入必须包含 `bw_all`，且为 23 个正方形二值通道。MATLAB �
 
 ## 当前状态与下一步
 
-项目已完成目录归类、架构梳理和主流程最小运行验证。四级灰度的核心需求和实施计划已确认：先用三条非零灰度细线验证背景之上的公共 `1/3、2/3、1` 有效亮度，再由用户复核是否进入不同通道的水果轮廓实验。
+项目已完成目录归类、架构梳理和主流程最小运行验证。当前处于 `experiment/four-level-lines` 分支的阶段 A：已锁定固定物理前向的独立回归测试，尚未开始目标生成或灰度损失修改。四级灰度的核心需求和实施计划已确认：先用三条非零灰度细线验证背景之上的公共 `1/3、2/3、1` 有效亮度，再由用户复核是否进入不同通道的水果轮廓实验。
 
 当前不是 Keil 工程，不涉及标准空工程选择。
