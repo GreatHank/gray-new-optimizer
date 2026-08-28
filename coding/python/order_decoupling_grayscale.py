@@ -20,6 +20,8 @@ CUSTOM_WEIGHTS = [
     1.63, 1.93, 4.37,
 ]
 
+TARGET_LEVELS = np.array([0.0, 1 / 3, 2 / 3, 1.0], dtype=np.float32)
+
 PAIR_MAT = np.array([
     [3, -3], [2, -3], [1, -3],
     [3, -2], [2, -2], [1, -2], [0, -2],
@@ -34,7 +36,7 @@ PAIR_MAT = np.array([
 def parse_args():
     script_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
-        description="优化 23 通道二值目标，并输出 0-1 归一化效果图与目标图对比。"
+        description="优化 23 通道二值或四标签目标，并输出效果图与目标图对比。"
     )
     parser.add_argument(
         "--mat-file",
@@ -93,8 +95,15 @@ def load_targets(mat_file):
         )
     if targets.shape[1] != targets.shape[2]:
         raise ValueError(f"目标图应为正方形，实际形状为 {targets.shape[1:]}。")
-    if not np.all(np.isin(targets, (0, 1))):
-        raise ValueError("bw_all 必须是只包含 0 和 1 的二值目标。")
+    if not np.all(
+        np.any(
+            np.isclose(
+                targets[..., None], TARGET_LEVELS, rtol=0, atol=1e-6
+            ),
+            axis=-1,
+        )
+    ):
+        raise ValueError("bw_all 必须只包含 0、1/3、2/3、1 四个标签。")
     return targets.astype(np.float32, copy=False)
 
 
@@ -245,7 +254,7 @@ def main():
     weights = torch.tensor(CUSTOM_WEIGHTS, dtype=torch.float32, device=device)
 
     print(f"Device: {device}")
-    print(f"Targets: {targets_np.shape}, values: 0/1")
+    print(f"Targets: {targets_np.shape}, values: 0, 1/3, 2/3, 1")
 
     torch.manual_seed(42)
     size = targets_np.shape[-1]
