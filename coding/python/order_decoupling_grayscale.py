@@ -70,6 +70,65 @@ def parse_args():
         default=0.0,
         help="最差通道亮区平均强度落后于通道均值的惩罚权重；0 表示关闭",
     )
+    parser.add_argument(
+        "--level-weight",
+        type=float,
+        default=0.0,
+        help="三档公共比例损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--cross-level-weight",
+        type=float,
+        default=0.0,
+        help="同档跨通道有效亮度一致性损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--gap-weight",
+        type=float,
+        default=0.0,
+        help="三档最小间隔损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--line-uniformity-weight",
+        type=float,
+        default=0.0,
+        help="线条内部强度方差损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--visibility-weight",
+        type=float,
+        default=0.0,
+        help="最低灰度可见性损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--worst-level-weight",
+        type=float,
+        default=0.0,
+        help="最差通道/灰度档低于公共目标的损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--background-uniformity-weight",
+        type=float,
+        default=0.0,
+        help="背景空间方差损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--reference-q",
+        type=float,
+        default=0.0,
+        help="固定公共最高档有效响应尺度；0 表示使用当轮统计量",
+    )
+    parser.add_argument(
+        "--background-row-uniformity-weight",
+        type=float,
+        default=0.0,
+        help="背景逐行均值方差损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--initial-results",
+        type=Path,
+        help="包含 phdx/phdy 的 NPZ 初始结果；不指定时使用随机初始化",
+    )
     return parser.parse_args()
 
 
@@ -123,24 +182,75 @@ def total_cost(
     weights,
     brightness_consistency_weight=0.0,
     worst_channel_weight=0.0,
+    level_weight=0.0,
+    cross_level_weight=0.0,
+    gap_weight=0.0,
+    line_uniformity_weight=0.0,
+    visibility_weight=0.0,
+    worst_level_weight=0.0,
+    background_uniformity_weight=0.0,
+    reference_q=0.0,
+    background_row_uniformity_weight=0.0,
 ):
     base_total = torch.zeros((), device=dx.device)
     efficiencies = []
     foreground_levels = []
+    level_responses = []
+    line_uniformities = []
+    background_uniformities = []
+    background_row_uniformities = []
     epsilon = 1e-9
+    target_levels = torch.tensor(
+        [1 / 3, 2 / 3, 1.0], dtype=targets.dtype, device=targets.device
+    )
 
     for channel in range(targets.shape[0]):
         m, n = pair_mat[channel]
         field = torch.exp(1j * (m * dx + n * dy))
         intensity = torch.abs(fftshift2(fft.fft2(field))) ** 2
-        efficiency = torch.sum(intensity[targets[channel] > 0]) / (
+        target = targets[channel]
+        foreground_mask = target > 0
+        background_mask = target == 0
+        efficiency = torch.sum(intensity[foreground_mask]) / (
             torch.sum(intensity) + epsilon
         )
-        foreground_mean = torch.mean(intensity[targets[channel] > 0])
+        foreground_mean = torch.mean(intensity[foreground_mask])
         full_plane_mean = torch.mean(intensity)
         foreground_levels.append(foreground_mean / (full_plane_mean + epsilon))
+        line_means = torch.stack(
+            [torch.mean(intensity[target == level]) for level in target_levels]
+        )
+        background_mean = torch.mean(intensity[background_mask])
+        responses = (line_means - background_mean) / (
+            full_plane_mean.detach() + epsilon
+        )
+        level_responses.append(responses)
+        line_uniformities.append(
+            torch.mean(
+                torch.stack(
+                    [
+                        torch.var(intensity[target == level], unbiased=False)
+                        / (full_plane_mean.detach() ** 2 + epsilon)
+                        for level in target_levels
+                    ]
+                )
+            )
+        )
+        background_uniformities.append(
+            torch.var(intensity[background_mask], unbiased=False)
+            / (full_plane_mean.detach() ** 2 + epsilon)
+        )
+        background_weights = background_mask.to(intensity.dtype)
+        row_counts = torch.sum(background_weights, dim=-1)
+        background_row_means = torch.sum(
+            intensity * background_weights, dim=-1
+        ) / (row_counts + epsilon)
+        background_row_uniformities.append(
+            torch.var(background_row_means, unbiased=False)
+            / (full_plane_mean.detach() ** 2 + epsilon)
+        )
         intensity_01 = intensity / (torch.max(intensity) + epsilon)
-        difference = intensity_01 - targets[channel]
+        difference = intensity_01 - target
         base_total = base_total + (
             weights[channel]
             * (((1 - efficiency) * 8) ** 3)
@@ -149,6 +259,12 @@ def total_cost(
         efficiencies.append(efficiency)
 
     foreground_levels = torch.stack(foreground_levels)
+    level_responses = torch.stack(level_responses)
+    line_uniformity_loss = torch.mean(torch.stack(line_uniformities))
+    background_uniformity_loss = torch.mean(torch.stack(background_uniformities))
+    background_row_uniformity_loss = torch.mean(
+        torch.stack(background_row_uniformities)
+    )
     foreground_mean = torch.mean(foreground_levels)
     brightness_cv_squared = torch.mean(
         ((foreground_levels - foreground_mean) / (foreground_mean + epsilon)) ** 2
@@ -156,10 +272,45 @@ def total_cost(
     worst_channel_ratio = torch.min(foreground_levels) / (foreground_mean + epsilon)
     worst_channel_gap_squared = (1 - worst_channel_ratio) ** 2
 
+    if reference_q > 0:
+        q = torch.tensor(reference_q, dtype=targets.dtype, device=targets.device)
+    else:
+        q = torch.clamp(
+            torch.mean(level_responses[:, 2]).detach(), min=epsilon
+        )
+    level_targets = q * target_levels
+    level_loss = torch.mean(
+        ((level_responses - level_targets) / (q + epsilon)) ** 2
+    )
+    level_means = torch.mean(level_responses, dim=0).detach()
+    cross_level_loss = torch.mean(
+        ((level_responses - level_means) / (torch.abs(level_means) + epsilon)) ** 2
+    )
+    gaps = torch.diff(level_responses, dim=1)
+    minimum_gap = q / 6
+    gap_loss = torch.mean(
+        (torch.relu(minimum_gap - gaps) / (q + epsilon)) ** 2
+    )
+    visibility_margin = q / 10
+    visibility_loss = torch.mean(
+        (torch.relu(visibility_margin - level_responses[:, 0]) / (q + epsilon)) ** 2
+    )
+    worst_level_loss = torch.mean(
+        (torch.relu(level_targets - level_responses) / (q + epsilon)) ** 2
+    )
+
     penalty_scale = base_total.detach()
     total = base_total + penalty_scale * (
         brightness_consistency_weight * brightness_cv_squared
         + worst_channel_weight * worst_channel_gap_squared
+        + level_weight * level_loss
+        + cross_level_weight * cross_level_loss
+        + gap_weight * gap_loss
+        + line_uniformity_weight * line_uniformity_loss
+        + visibility_weight * visibility_loss
+        + worst_level_weight * worst_level_loss
+        + background_uniformity_weight * background_uniformity_loss
+        + background_row_uniformity_weight * background_row_uniformity_loss
     )
 
     return (
@@ -168,6 +319,16 @@ def total_cost(
         foreground_levels.detach(),
         torch.sqrt(brightness_cv_squared).detach(),
         worst_channel_ratio.detach(),
+        level_responses.detach(),
+        q.detach(),
+        level_loss.detach(),
+        cross_level_loss.detach(),
+        gap_loss.detach(),
+        line_uniformity_loss.detach(),
+        visibility_loss.detach(),
+        worst_level_loss.detach(),
+        background_uniformity_loss.detach(),
+        background_row_uniformity_loss.detach(),
     )
 
 
@@ -205,6 +366,50 @@ def channel_metrics(raw, targets):
             background_mean,
             foreground_mean / (background_mean + epsilon),
         ])
+    return np.asarray(rows, dtype=np.float64)
+
+
+def grayscale_metrics(raw, targets):
+    rows = []
+    epsilon = 1e-12
+    levels = (1 / 3, 2 / 3, 1.0)
+    for channel in range(targets.shape[0]):
+        target = targets[channel]
+        background = raw[channel][target == 0]
+        background_mask = target == 0
+        row_weights = background_mask.astype(np.float64)
+        row_counts = np.sum(row_weights, axis=1)
+        background_row_means = np.sum(
+            raw[channel] * row_weights, axis=1
+        ) / (row_counts + epsilon)
+        line_means = np.asarray(
+            [raw[channel][target == level].mean() for level in levels]
+        )
+        plane_mean = float(np.mean(raw[channel]))
+        background_mean = float(np.mean(background))
+        responses = (line_means - background_mean) / (plane_mean + epsilon)
+        ratios = responses / (responses[2] + epsilon)
+        gaps = np.diff(responses)
+        line_variances = [
+            float(np.var(raw[channel][target == level])) for level in levels
+        ]
+        rows.append(
+            [
+                channel + 1,
+                PAIR_MAT[channel, 0],
+                PAIR_MAT[channel, 1],
+                plane_mean,
+                background_mean,
+                float(np.var(background)),
+                float(np.var(background_row_means)),
+                float(np.percentile(background, 95)),
+                *responses,
+                *ratios,
+                int(np.all(gaps > 0)),
+                float(np.min(gaps)),
+                *line_variances,
+            ]
+        )
     return np.asarray(rows, dtype=np.float64)
 
 
@@ -246,6 +451,19 @@ def main():
         raise ValueError("brightness-consistency-weight 不能小于 0。")
     if args.worst_channel_weight < 0:
         raise ValueError("worst-channel-weight 不能小于 0。")
+    for option_name in (
+        "level_weight",
+        "cross_level_weight",
+        "gap_weight",
+        "line_uniformity_weight",
+        "visibility_weight",
+        "worst_level_weight",
+        "background_uniformity_weight",
+        "reference_q",
+        "background_row_uniformity_weight",
+    ):
+        if getattr(args, option_name) < 0:
+            raise ValueError(f"{option_name} 不能小于 0。")
 
     device = select_device(args.device)
     targets_np = load_targets(args.mat_file)
@@ -256,10 +474,26 @@ def main():
     print(f"Device: {device}")
     print(f"Targets: {targets_np.shape}, values: 0, 1/3, 2/3, 1")
 
-    torch.manual_seed(42)
     size = targets_np.shape[-1]
-    phdx = (torch.rand((size, size), device=device) * 2 * np.pi).requires_grad_()
-    phdy = (torch.rand((size, size), device=device) * 2 * np.pi).requires_grad_()
+    if args.initial_results is None:
+        torch.manual_seed(42)
+        phdx = (
+            torch.rand((size, size), device=device) * 2 * np.pi
+        ).requires_grad_()
+        phdy = (
+            torch.rand((size, size), device=device) * 2 * np.pi
+        ).requires_grad_()
+    else:
+        initial = np.load(args.initial_results)
+        if "phdx" not in initial or "phdy" not in initial:
+            raise KeyError("initial-results 必须包含 phdx 和 phdy。")
+        if initial["phdx"].shape != (size, size) or initial["phdy"].shape != (
+            size,
+            size,
+        ):
+            raise ValueError("initial-results 中 phdx/phdy 尺寸必须与目标图一致。")
+        phdx = torch.tensor(initial["phdx"], device=device).requires_grad_()
+        phdy = torch.tensor(initial["phdy"], device=device).requires_grad_()
     optimizer = optim.Adam([phdx, phdy], lr=args.lr)
 
     costs = []
@@ -267,6 +501,16 @@ def main():
     foreground_level_history = []
     brightness_cv_history = []
     worst_channel_ratio_history = []
+    level_response_history = []
+    q_history = []
+    level_loss_history = []
+    cross_level_loss_history = []
+    gap_loss_history = []
+    line_uniformity_loss_history = []
+    visibility_loss_history = []
+    worst_level_loss_history = []
+    background_uniformity_loss_history = []
+    background_row_uniformity_loss_history = []
     started_at = time.time()
     for epoch in range(1, args.epochs + 1):
         optimizer.zero_grad()
@@ -276,14 +520,33 @@ def main():
             foreground_levels,
             brightness_cv,
             worst_channel_ratio,
+            level_responses,
+            q,
+            level_loss,
+            cross_level_loss,
+            gap_loss,
+            line_uniformity_loss,
+            visibility_loss,
+            worst_level_loss,
+            background_uniformity_loss,
+            background_row_uniformity_loss,
         ) = total_cost(
             phdx,
             phdy,
             targets,
             pair_mat,
             weights,
-            args.brightness_consistency_weight,
-            args.worst_channel_weight,
+            brightness_consistency_weight=args.brightness_consistency_weight,
+            worst_channel_weight=args.worst_channel_weight,
+            level_weight=args.level_weight,
+            cross_level_weight=args.cross_level_weight,
+            gap_weight=args.gap_weight,
+            line_uniformity_weight=args.line_uniformity_weight,
+            visibility_weight=args.visibility_weight,
+            worst_level_weight=args.worst_level_weight,
+            background_uniformity_weight=args.background_uniformity_weight,
+            reference_q=args.reference_q,
+            background_row_uniformity_weight=args.background_row_uniformity_weight,
         )
         loss.backward()
         optimizer.step()
@@ -293,11 +556,25 @@ def main():
         foreground_level_history.append(foreground_levels.cpu().numpy())
         brightness_cv_history.append(brightness_cv.item())
         worst_channel_ratio_history.append(worst_channel_ratio.item())
+        level_response_history.append(level_responses.cpu().numpy())
+        q_history.append(q.item())
+        level_loss_history.append(level_loss.item())
+        cross_level_loss_history.append(cross_level_loss.item())
+        gap_loss_history.append(gap_loss.item())
+        line_uniformity_loss_history.append(line_uniformity_loss.item())
+        visibility_loss_history.append(visibility_loss.item())
+        worst_level_loss_history.append(worst_level_loss.item())
+        background_uniformity_loss_history.append(background_uniformity_loss.item())
+        background_row_uniformity_loss_history.append(
+            background_row_uniformity_loss.item()
+        )
         if epoch == 1 or epoch % args.log_interval == 0 or epoch == args.epochs:
             print(
                 f"[Epoch {epoch}/{args.epochs}] Loss={loss.item():.6e} "
                 f"BrightCV={brightness_cv.item():.4f} "
-                f"Worst/Mean={worst_channel_ratio.item():.4f}"
+                f"Worst/Mean={worst_channel_ratio.item():.4f} "
+                f"BgVar={background_uniformity_loss.item():.4f} "
+                f"BgRowVar={background_row_uniformity_loss.item():.4f}"
             )
 
     print(f"优化完成，用时 {time.time() - started_at:.1f} 秒")
@@ -312,6 +589,7 @@ def main():
         phdx, phdy, pair_mat
     )
     metrics = channel_metrics(optimized_raw, targets_np)
+    grayscale_level_metrics = grayscale_metrics(optimized_raw, targets_np)
     np.savez_compressed(
         output_dir / "optimized_results.npz",
         phdx=phdx.detach().cpu().numpy(),
@@ -327,8 +605,31 @@ def main():
         foreground_level_history=np.asarray(foreground_level_history),
         brightness_cv_history=np.asarray(brightness_cv_history),
         worst_channel_ratio_history=np.asarray(worst_channel_ratio_history),
+        level_response_history=np.asarray(level_response_history),
+        q_history=np.asarray(q_history),
+        level_loss_history=np.asarray(level_loss_history),
+        cross_level_loss_history=np.asarray(cross_level_loss_history),
+        gap_loss_history=np.asarray(gap_loss_history),
+        line_uniformity_loss_history=np.asarray(line_uniformity_loss_history),
+        visibility_loss_history=np.asarray(visibility_loss_history),
+        worst_level_loss_history=np.asarray(worst_level_loss_history),
+        background_uniformity_loss_history=np.asarray(
+            background_uniformity_loss_history
+        ),
+        background_row_uniformity_loss_history=np.asarray(
+            background_row_uniformity_loss_history
+        ),
         brightness_consistency_weight=args.brightness_consistency_weight,
         worst_channel_weight=args.worst_channel_weight,
+        level_weight=args.level_weight,
+        cross_level_weight=args.cross_level_weight,
+        gap_weight=args.gap_weight,
+        line_uniformity_weight=args.line_uniformity_weight,
+        visibility_weight=args.visibility_weight,
+        worst_level_weight=args.worst_level_weight,
+        background_uniformity_weight=args.background_uniformity_weight,
+        reference_q=args.reference_q,
+        background_row_uniformity_weight=args.background_row_uniformity_weight,
     )
     np.savetxt(
         output_dir / "channel_brightness_metrics.csv",
@@ -337,6 +638,19 @@ def main():
         header=(
             "channel,m,n,target_pixels,total_energy,target_efficiency,"
             "foreground_mean,background_mean,foreground_background_contrast"
+        ),
+        comments="",
+    )
+    np.savetxt(
+        output_dir / "grayscale_level_metrics.csv",
+        grayscale_level_metrics,
+        delimiter=",",
+        header=(
+            "channel,m,n,plane_mean,background_mean,background_variance,"
+            "background_row_variance,background_p95,S_1_3,S_2_3,S_1,"
+            "ratio_1_3,ratio_2_3,ratio_1,"
+            "monotonic,min_gap,line_variance_1_3,line_variance_2_3,"
+            "line_variance_1"
         ),
         comments="",
     )
