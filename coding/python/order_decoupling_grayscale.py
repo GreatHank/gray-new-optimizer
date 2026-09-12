@@ -8,35 +8,26 @@ import numpy as np
 import scipy.io as sio
 import torch
 import torch.fft as fft
+import torch.nn.functional as F
 import torch.optim as optim
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-CUSTOM_WEIGHTS = [
-    2.31, 1.77, 2.61, 2.0, 2.56, 3.0, 3.78, 3.58, 6.23, 5.36,
-    10.71, 2.44, 3.37, 10.82, 2.41, 3.39, 9.35, 2.36, 4.48, 2.9,
-    1.63, 1.93, 4.37,
-]
+CUSTOM_WEIGHTS = np.ones(36, dtype=np.float32)
 
 TARGET_LEVELS = np.array([0.0, 1 / 3, 2 / 3, 1.0], dtype=np.float32)
 
-PAIR_MAT = np.array([
-    [3, -3], [2, -3], [1, -3],
-    [3, -2], [2, -2], [1, -2], [0, -2],
-    [3, -1], [2, -1], [1, -1], [0, -1],
-    [3, 0], [2, 0], [1, 0],
-    [3, 1], [2, 1], [1, 1],
-    [3, 2], [2, 2], [1, 2],
-    [3, 3], [2, 3], [1, 3],
-], dtype=int)
+PAIR_MAT = np.array(
+    [(m, n) for m in range(1, 7) for n in range(1, 7)], dtype=int
+)
 
 
 def parse_args():
     script_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
-        description="优化 23 通道二值或四标签目标，并输出效果图与目标图对比。"
+        description="优化连续级次方阵中的二值或四标签目标，并输出效果图与目标图对比。"
     )
     parser.add_argument(
         "--mat-file",
@@ -46,6 +37,93 @@ def parse_args():
     )
     parser.add_argument("--epochs", type=int, default=30000, help="优化轮数")
     parser.add_argument("--lr", type=float, default=5e-4, help="Adam 学习率")
+    parser.add_argument("--seed", type=int, default=42, help="随机初始化种子")
+    parser.add_argument(
+        "--channel-count",
+        type=int,
+        default=len(PAIR_MAT),
+        help="只优化前 N 个通道，用于逐步检查多通道可行性",
+    )
+    parser.add_argument(
+        "--order-grid-size",
+        type=int,
+        default=6,
+        help="正级次方阵边长；6表示(1,1)…(6,6)，7表示最多49个级次",
+    )
+    parser.add_argument(
+        "--order-m-start",
+        type=int,
+        default=1,
+        help="连续级次方阵的 m 起点；默认1",
+    )
+    parser.add_argument(
+        "--order-n-start",
+        type=int,
+        default=1,
+        help="连续级次方阵的 n 起点；默认1",
+    )
+    parser.add_argument(
+        "--image-loss-mode",
+        choices=("energy", "sum", "balanced"),
+        default="energy",
+        help="图案损失模式；energy 按目标灰度分配总衍射能量，适合稀疏灰度目标",
+    )
+    parser.add_argument(
+        "--foreground-loss-weight",
+        type=float,
+        default=1.0,
+        help="balanced 图案损失中的前景权重",
+    )
+    parser.add_argument(
+        "--background-loss-weight",
+        type=float,
+        default=1.0,
+        help="balanced 图案损失中的背景权重",
+    )
+    parser.add_argument(
+        "--foreground-efficiency-weight",
+        type=float,
+        default=0.0,
+        help="直接提高目标前景能量占比的损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--foreground-background-cnr-weight",
+        type=float,
+        default=0.0,
+        help="直接提高前景/背景CNR的尺度不敏感损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--paper-snr-weight",
+        type=float,
+        default=0.0,
+        help="论文SNR门槛损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--paper-snr-target-db",
+        type=float,
+        default=15.0,
+        help="论文SNR逐通道目标门槛，单位dB；默认15",
+    )
+    parser.add_argument(
+        "--structure-completeness-weight",
+        type=float,
+        default=0.0,
+        help="逐目标像素最低灰度响应损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--gray-ratio-weight",
+        type=float,
+        default=0.0,
+        help="每通道三档相对比例损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--desired-gray-ratios",
+        nargs=2,
+        type=float,
+        default=(1 / 3, 2 / 3),
+        metavar=("LOW", "MID"),
+        help="最低档和中间档相对最高档的目标响应；最高档固定为1",
+    )
     parser.add_argument(
         "--device",
         choices=("auto", "cpu", "cuda"),
@@ -55,7 +133,7 @@ def parse_args():
     parser.add_argument(
         "--output-dir",
         type=Path,
-        help="输出目录；默认在脚本目录下按时间创建 results_23channels_*",
+        help="输出目录；默认在脚本目录下按时间创建 results_36channels_*",
     )
     parser.add_argument("--log-interval", type=int, default=100)
     parser.add_argument(
@@ -69,6 +147,19 @@ def parse_args():
         type=float,
         default=0.0,
         help="最差通道亮区平均强度落后于通道均值的惩罚权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--priority-channels",
+        nargs="*",
+        type=int,
+        default=(),
+        help="需要优先保证主结构损失的1-based通道编号",
+    )
+    parser.add_argument(
+        "--priority-channel-weight",
+        type=float,
+        default=1.0,
+        help="priority-channels对应的主结构损失倍率；默认1",
     )
     parser.add_argument(
         "--level-weight",
@@ -125,6 +216,42 @@ def parse_args():
         help="背景逐行均值方差损失权重；0 表示关闭",
     )
     parser.add_argument(
+        "--background-band-weight",
+        type=float,
+        default=0.0,
+        help="所有背景像素亮度带损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--background-band-lower",
+        type=float,
+        default=0.0,
+        help="背景亮度带下限，按 I/全平面均值归一化",
+    )
+    parser.add_argument(
+        "--background-band-upper",
+        type=float,
+        default=0.0,
+        help="背景亮度带上限，按 I/全平面均值归一化；0 表示关闭亮度带",
+    )
+    parser.add_argument(
+        "--background-cluster-weight",
+        type=float,
+        default=0.0,
+        help="背景局部亮度集中损失权重；0 表示关闭",
+    )
+    parser.add_argument(
+        "--background-cluster-kernel",
+        type=int,
+        default=9,
+        help="背景局部亮度集中损失的邻域边长，必须为大于等于 3 的奇数",
+    )
+    parser.add_argument(
+        "--background-cluster-upper",
+        type=float,
+        default=0.0,
+        help="背景邻域平均亮度上限，按 I/全平面均值归一化；0 表示关闭",
+    )
+    parser.add_argument(
         "--initial-results",
         type=Path,
         help="包含 phdx/phdy 的 NPZ 初始结果；不指定时使用随机初始化",
@@ -140,7 +267,7 @@ def select_device(name):
     return torch.device(name)
 
 
-def load_targets(mat_file):
+def load_targets(mat_file, max_channels=len(CUSTOM_WEIGHTS)):
     mat = sio.loadmat(mat_file)
     if "bw_all" not in mat:
         raise KeyError(f"{mat_file} 中不存在变量 bw_all。")
@@ -148,9 +275,9 @@ def load_targets(mat_file):
     targets = np.asarray(mat["bw_all"])
     if targets.ndim != 3:
         raise ValueError(f"bw_all 应为三维数组，实际形状为 {targets.shape}。")
-    if targets.shape[0] != len(CUSTOM_WEIGHTS):
+    if not 1 <= targets.shape[0] <= max_channels:
         raise ValueError(
-            f"通道数应为 {len(CUSTOM_WEIGHTS)}，实际为 {targets.shape[0]}。"
+            f"通道数应在1到{max_channels}之间，实际为{targets.shape[0]}。"
         )
     if targets.shape[1] != targets.shape[2]:
         raise ValueError(f"目标图应为正方形，实际形状为 {targets.shape[1:]}。")
@@ -166,12 +293,96 @@ def load_targets(mat_file):
     return targets.astype(np.float32, copy=False)
 
 
+def load_grid_positions(mat_file, channel_count, grid_size=6):
+    mat = sio.loadmat(mat_file)
+    if "grid_positions" not in mat:
+        return np.asarray(
+            [divmod(index, grid_size) for index in range(channel_count)], dtype=np.int16
+        )
+    positions = np.asarray(mat["grid_positions"], dtype=np.int16)
+    if positions.shape != (channel_count, 2):
+        raise ValueError(
+            "grid_positions 应为与bw_all通道数一致的 N×2 数组，"
+            f"实际形状为 {positions.shape}。"
+        )
+    if np.any(positions < 0) or np.any(positions >= grid_size):
+        raise ValueError(
+            f"grid_positions 必须使用0到{grid_size - 1}的{grid_size}×{grid_size}网格坐标。"
+        )
+    if len(np.unique(positions, axis=0)) != channel_count:
+        raise ValueError("grid_positions 不能包含重复坐标。")
+    return positions
+
+
+def build_order_pairs(grid_positions, m_start=1, n_start=1):
+    starts = np.asarray([m_start, n_start], dtype=np.int16)
+    order_pairs = np.asarray(grid_positions, dtype=np.int16) + starts
+    if np.any(np.all(order_pairs == 0, axis=1)):
+        raise ValueError("连续级次方阵不能包含零级次 (0,0)。")
+    return order_pairs
+
+
+def build_channel_weights(channel_count, priority_channels=(), priority_weight=1.0):
+    if priority_weight <= 0:
+        raise ValueError("priority-channel-weight 必须大于0。")
+    weights = np.ones(channel_count, dtype=np.float32)
+    for channel in priority_channels:
+        if not 1 <= channel <= channel_count:
+            raise ValueError(
+                f"priority-channels中的{channel}不在1到{channel_count}范围内。"
+            )
+        weights[channel - 1] = priority_weight
+    return weights
+
+
 def fftshift2(x):
     return torch.roll(
         torch.roll(x, shifts=(x.shape[-2] // 2,), dims=(-2,)),
         shifts=(x.shape[-1] // 2,),
         dims=(-1,),
     )
+
+
+def energy_distribution_loss(
+    intensity,
+    target,
+    epsilon=1e-9,
+    desired_gray_ratios=None,
+):
+    foreground_mask = target > 0
+    target_weights = target
+    if desired_gray_ratios is not None:
+        target_weights = torch.zeros_like(target)
+        for label, desired_ratio in zip(
+            (1 / 3, 2 / 3, 1.0), desired_gray_ratios
+        ):
+            target_weights[target == label] = desired_ratio
+    desired = target_weights[foreground_mask] / torch.sum(target_weights)
+    actual = intensity[foreground_mask] / torch.sum(intensity)
+    return torch.sum(
+        desired * (torch.log(desired + epsilon) - torch.log(actual + epsilon))
+    )
+
+
+def foreground_background_cnr_loss(intensity, target, epsilon=1e-9):
+    foreground = intensity[target > 0]
+    background = intensity[target == 0]
+    background_std = torch.sqrt(torch.var(background, unbiased=False) + epsilon)
+    cnr = (torch.mean(foreground) - torch.mean(background)) / (
+        background_std + epsilon
+    )
+    return F.softplus(1.0 - cnr), cnr
+
+
+def paper_snr_threshold_loss(intensity, target, target_db=15.0, epsilon=1e-9):
+    foreground_mean = torch.mean(intensity[target > 0])
+    background_std = torch.sqrt(
+        torch.var(intensity[target == 0], unbiased=False) + epsilon
+    )
+    ratio = foreground_mean / (background_std + epsilon)
+    target_ratio = 10 ** (target_db / 20.0)
+    normalized_shortfall = torch.relu(target_ratio - ratio) / target_ratio
+    return normalized_shortfall, ratio
 
 
 def total_cost(
@@ -191,17 +402,47 @@ def total_cost(
     background_uniformity_weight=0.0,
     reference_q=0.0,
     background_row_uniformity_weight=0.0,
+    background_band_weight=0.0,
+    background_band_lower=0.0,
+    background_band_upper=0.0,
+    background_cluster_weight=0.0,
+    background_cluster_kernel=9,
+    background_cluster_upper=0.0,
+    image_loss_mode="energy",
+    foreground_loss_weight=1.0,
+    background_loss_weight=1.0,
+    foreground_efficiency_weight=0.0,
+    foreground_background_cnr_weight=0.0,
+    paper_snr_weight=0.0,
+    paper_snr_target_db=15.0,
+    structure_completeness_weight=0.0,
+    gray_ratio_weight=0.0,
+    desired_gray_ratios=(1 / 3, 2 / 3, 1.0),
 ):
     base_total = torch.zeros((), device=dx.device)
     efficiencies = []
     foreground_levels = []
     level_responses = []
+    level_presence = []
     line_uniformities = []
     background_uniformities = []
     background_row_uniformities = []
+    background_band_losses = []
+    background_cluster_losses = []
+    foreground_contrasts = []
+    foreground_targets = []
+    foreground_background_cnr_losses = []
+    paper_snr_losses = []
+    paper_snr_ratios = []
     epsilon = 1e-9
     target_levels = torch.tensor(
         [1 / 3, 2 / 3, 1.0], dtype=targets.dtype, device=targets.device
+    )
+    desired_gray_ratios = torch.as_tensor(
+        desired_gray_ratios, dtype=targets.dtype, device=targets.device
+    )
+    has_three_levels = all(
+        bool(torch.any(targets == level).item()) for level in target_levels
     )
 
     for channel in range(targets.shape[0]):
@@ -217,25 +458,49 @@ def total_cost(
         foreground_mean = torch.mean(intensity[foreground_mask])
         full_plane_mean = torch.mean(intensity)
         foreground_levels.append(foreground_mean / (full_plane_mean + epsilon))
-        line_means = torch.stack(
-            [torch.mean(intensity[target == level]) for level in target_levels]
-        )
         background_mean = torch.mean(intensity[background_mask])
+        cnr_loss, _cnr = foreground_background_cnr_loss(intensity, target)
+        foreground_background_cnr_losses.append(cnr_loss)
+        paper_snr_loss, paper_snr_ratio = paper_snr_threshold_loss(
+            intensity, target, target_db=paper_snr_target_db
+        )
+        paper_snr_losses.append(paper_snr_loss)
+        paper_snr_ratios.append(paper_snr_ratio)
+        present = torch.stack([torch.any(target == level) for level in target_levels])
+        line_means = torch.stack(
+            [
+                torch.mean(intensity[target == level])
+                if bool(is_present.item())
+                else background_mean
+                for level, is_present in zip(target_levels, present)
+            ]
+        )
         responses = (line_means - background_mean) / (
             full_plane_mean.detach() + epsilon
         )
         level_responses.append(responses)
-        line_uniformities.append(
-            torch.mean(
-                torch.stack(
-                    [
-                        torch.var(intensity[target == level], unbiased=False)
-                        / (full_plane_mean.detach() ** 2 + epsilon)
-                        for level in target_levels
-                    ]
-                )
+        level_presence.append(present)
+        foreground_contrasts.append(
+            torch.relu(
+                (intensity[foreground_mask] - background_mean)
+                / (full_plane_mean.detach() + epsilon)
             )
         )
+        desired_target = torch.zeros_like(target)
+        for label, desired_ratio in zip(target_levels, desired_gray_ratios):
+            desired_target[target == label] = desired_ratio
+        foreground_targets.append(desired_target[foreground_mask])
+        level_variances = torch.stack(
+            [
+                torch.var(intensity[target == level], unbiased=False)
+                / (line_mean.detach() ** 2 + epsilon)
+                for level, line_mean, is_present in zip(
+                    target_levels, line_means, present
+                )
+                if bool(is_present.item())
+            ]
+        )
+        line_uniformities.append(torch.mean(level_variances))
         background_uniformities.append(
             torch.var(intensity[background_mask], unbiased=False)
             / (full_plane_mean.detach() ** 2 + epsilon)
@@ -249,22 +514,75 @@ def total_cost(
             torch.var(background_row_means, unbiased=False)
             / (full_plane_mean.detach() ** 2 + epsilon)
         )
-        intensity_01 = intensity / (torch.max(intensity) + epsilon)
-        difference = intensity_01 - target
-        base_total = base_total + (
-            weights[channel]
-            * (((1 - efficiency) * 8) ** 3)
-            * torch.sum(difference**2)
+        normalized_intensity = intensity / (full_plane_mean.detach() + epsilon)
+        upper_violation = torch.relu(normalized_intensity - background_band_upper)
+        lower_violation = torch.relu(background_band_lower - normalized_intensity)
+        background_band_losses.append(
+            torch.mean(
+                upper_violation[background_mask] ** 2
+                + lower_violation[background_mask] ** 2
+            )
         )
+        kernel = background_cluster_kernel
+        pooled_intensity = F.avg_pool2d(
+            (normalized_intensity * background_mask).unsqueeze(0).unsqueeze(0),
+            kernel_size=kernel,
+            stride=1,
+            padding=kernel // 2,
+        )
+        pooled_mask = F.avg_pool2d(
+            background_mask.to(intensity.dtype).unsqueeze(0).unsqueeze(0),
+            kernel_size=kernel,
+            stride=1,
+            padding=kernel // 2,
+        )
+        local_background_mean = pooled_intensity / (pooled_mask + epsilon)
+        cluster_violation = torch.relu(
+            local_background_mean.squeeze(0).squeeze(0)
+            - background_cluster_upper
+        )
+        background_cluster_losses.append(
+            torch.mean(cluster_violation[background_mask] ** 2)
+        )
+        if image_loss_mode == "energy":
+            image_error = energy_distribution_loss(
+                intensity,
+                target,
+                epsilon,
+                desired_gray_ratios=desired_gray_ratios,
+            )
+            channel_cost = weights[channel] * image_error
+        else:
+            intensity_01 = intensity / (torch.max(intensity) + epsilon)
+            difference = intensity_01 - target
+            if image_loss_mode == "balanced":
+                foreground_error = torch.mean(difference[foreground_mask] ** 2)
+                background_error = torch.mean(difference[background_mask] ** 2)
+                image_error = (
+                    foreground_loss_weight * foreground_error
+                    + background_loss_weight * background_error
+                ) / (foreground_loss_weight + background_loss_weight)
+            else:
+                image_error = torch.sum(difference**2)
+            channel_cost = (
+                weights[channel]
+                * (((1 - efficiency) * 8) ** 3)
+                * image_error
+            )
+        base_total = base_total + channel_cost
         efficiencies.append(efficiency)
 
     foreground_levels = torch.stack(foreground_levels)
+    efficiencies = torch.stack(efficiencies)
     level_responses = torch.stack(level_responses)
+    level_presence = torch.stack(level_presence)
     line_uniformity_loss = torch.mean(torch.stack(line_uniformities))
     background_uniformity_loss = torch.mean(torch.stack(background_uniformities))
     background_row_uniformity_loss = torch.mean(
         torch.stack(background_row_uniformities)
     )
+    background_band_loss = torch.mean(torch.stack(background_band_losses))
+    background_cluster_loss = torch.mean(torch.stack(background_cluster_losses))
     foreground_mean = torch.mean(foreground_levels)
     brightness_cv_squared = torch.mean(
         ((foreground_levels - foreground_mean) / (foreground_mean + epsilon)) ** 2
@@ -278,28 +596,81 @@ def total_cost(
         q = torch.clamp(
             torch.mean(level_responses[:, 2]).detach(), min=epsilon
         )
-    level_targets = q * target_levels
-    level_loss = torch.mean(
-        ((level_responses - level_targets) / (q + epsilon)) ** 2
+    level_targets = q * desired_gray_ratios
+    structure_completeness_loss = torch.mean(
+        torch.stack(
+            [
+                torch.mean(
+                    (
+                        torch.relu(q * target_values - contrasts)
+                        / (q + epsilon)
+                    )
+                    ** 2
+                )
+                for contrasts, target_values in zip(
+                    foreground_contrasts, foreground_targets
+                )
+            ]
+        )
     )
-    level_means = torch.mean(level_responses, dim=0).detach()
-    cross_level_loss = torch.mean(
-        ((level_responses - level_means) / (torch.abs(level_means) + epsilon)) ** 2
-    )
-    gaps = torch.diff(level_responses, dim=1)
-    minimum_gap = q / 6
-    gap_loss = torch.mean(
-        (torch.relu(minimum_gap - gaps) / (q + epsilon)) ** 2
-    )
-    visibility_margin = q / 10
-    visibility_loss = torch.mean(
-        (torch.relu(visibility_margin - level_responses[:, 0]) / (q + epsilon)) ** 2
-    )
-    worst_level_loss = torch.mean(
-        (torch.relu(level_targets - level_responses) / (q + epsilon)) ** 2
-    )
+    zero = torch.zeros((), dtype=targets.dtype, device=targets.device)
+    if has_three_levels:
+        channel_q = torch.clamp(
+            torch.abs(level_responses[:, 2].detach()), min=epsilon
+        )
+        ratio_mask = level_presence & level_presence[:, 2:3]
+        ratio_errors = (
+            level_responses / channel_q.unsqueeze(1)
+            - desired_gray_ratios.unsqueeze(0)
+        ) ** 2
+        gray_ratio_loss = torch.mean(ratio_errors[ratio_mask])
+        level_errors = ((level_responses - level_targets) / (q + epsilon)) ** 2
+        level_loss = torch.mean(level_errors[level_presence])
+        cross_level_errors = []
+        for level_index in range(3):
+            values = level_responses[level_presence[:, level_index], level_index]
+            if values.numel() > 0:
+                level_mean = torch.mean(values).detach()
+                cross_level_errors.append(
+                    ((values - level_mean) / (torch.abs(level_mean) + epsilon)) ** 2
+                )
+        cross_level_loss = torch.mean(torch.cat(cross_level_errors))
+        gaps = torch.diff(level_responses, dim=1)
+        gap_mask = level_presence[:, :-1] & level_presence[:, 1:]
+        minimum_gap = q / 6
+        gap_loss = torch.mean(
+            ((torch.relu(minimum_gap - gaps) / (q + epsilon)) ** 2)[gap_mask]
+        ) if bool(torch.any(gap_mask).item()) else zero
+        visibility_margin = q / 10
+        lowest_present = level_presence[:, 0]
+        visibility_loss = torch.mean(
+            (torch.relu(visibility_margin - level_responses[lowest_present, 0]) / (q + epsilon))
+            ** 2
+        ) if bool(torch.any(lowest_present).item()) else zero
+        worst_errors = (
+            torch.relu(level_targets - level_responses) / (q + epsilon)
+        ) ** 2
+        worst_level_loss = torch.mean(worst_errors[level_presence])
+    else:
+        gray_ratio_loss = zero
+        level_loss = zero
+        cross_level_loss = zero
+        gap_loss = zero
+        visibility_loss = zero
+        worst_level_loss = zero
 
     penalty_scale = base_total.detach()
+    foreground_efficiency_loss = torch.mean((1 - efficiencies) ** 2)
+    foreground_background_cnr_loss_value = torch.mean(
+        torch.stack(foreground_background_cnr_losses)
+    )
+    paper_snr_losses = torch.stack(paper_snr_losses)
+    paper_snr_loss_value = torch.mean(paper_snr_losses) + torch.max(
+        paper_snr_losses
+    )
+    paper_snr_min_db = 20 * torch.log10(
+        torch.clamp(torch.min(torch.stack(paper_snr_ratios)), min=epsilon)
+    )
     total = base_total + penalty_scale * (
         brightness_consistency_weight * brightness_cv_squared
         + worst_channel_weight * worst_channel_gap_squared
@@ -311,11 +682,18 @@ def total_cost(
         + worst_level_weight * worst_level_loss
         + background_uniformity_weight * background_uniformity_loss
         + background_row_uniformity_weight * background_row_uniformity_loss
+        + background_band_weight * background_band_loss
+        + background_cluster_weight * background_cluster_loss
+        + foreground_efficiency_weight * foreground_efficiency_loss
+        + foreground_background_cnr_weight * foreground_background_cnr_loss_value
+        + paper_snr_weight * paper_snr_loss_value
+        + structure_completeness_weight * structure_completeness_loss
+        + gray_ratio_weight * gray_ratio_loss
     )
 
     return (
         total,
-        torch.stack(efficiencies).detach(),
+        efficiencies.detach(),
         foreground_levels.detach(),
         torch.sqrt(brightness_cv_squared).detach(),
         worst_channel_ratio.detach(),
@@ -329,6 +707,13 @@ def total_cost(
         worst_level_loss.detach(),
         background_uniformity_loss.detach(),
         background_row_uniformity_loss.detach(),
+        background_band_loss.detach(),
+        background_cluster_loss.detach(),
+        structure_completeness_loss.detach(),
+        gray_ratio_loss.detach(),
+        foreground_background_cnr_loss_value.detach(),
+        paper_snr_loss_value.detach(),
+        paper_snr_min_db.detach(),
     )
 
 
@@ -345,7 +730,7 @@ def reconstruct(phdx, phdy, pair_mat):
     return raw.cpu().numpy(), per_channel_01.cpu().numpy(), global_01.cpu().numpy()
 
 
-def channel_metrics(raw, targets):
+def channel_metrics(raw, targets, pair_mat=PAIR_MAT):
     rows = []
     epsilon = 1e-12
     for channel in range(targets.shape[0]):
@@ -357,8 +742,8 @@ def channel_metrics(raw, targets):
         background_mean = float(np.mean(background))
         rows.append([
             channel + 1,
-            PAIR_MAT[channel, 0],
-            PAIR_MAT[channel, 1],
+            pair_mat[channel, 0],
+            pair_mat[channel, 1],
             np.count_nonzero(mask),
             total_energy,
             float(np.sum(foreground) / (total_energy + epsilon)),
@@ -369,7 +754,7 @@ def channel_metrics(raw, targets):
     return np.asarray(rows, dtype=np.float64)
 
 
-def grayscale_metrics(raw, targets):
+def grayscale_metrics(raw, targets, pair_mat=PAIR_MAT):
     rows = []
     epsilon = 1e-12
     levels = (1 / 3, 2 / 3, 1.0)
@@ -382,22 +767,32 @@ def grayscale_metrics(raw, targets):
         background_row_means = np.sum(
             raw[channel] * row_weights, axis=1
         ) / (row_counts + epsilon)
+        present = np.asarray([np.any(target == level) for level in levels])
         line_means = np.asarray(
-            [raw[channel][target == level].mean() for level in levels]
+            [
+                raw[channel][target == level].mean() if is_present else np.nan
+                for level, is_present in zip(levels, present)
+            ]
         )
         plane_mean = float(np.mean(raw[channel]))
         background_mean = float(np.mean(background))
         responses = (line_means - background_mean) / (plane_mean + epsilon)
-        ratios = responses / (responses[2] + epsilon)
-        gaps = np.diff(responses)
+        ratios = (
+            responses / (responses[2] + epsilon)
+            if present[2]
+            else np.full(3, np.nan)
+        )
+        present_responses = responses[present]
+        present_gaps = np.diff(present_responses)
         line_variances = [
-            float(np.var(raw[channel][target == level])) for level in levels
+            float(np.var(raw[channel][target == level])) if is_present else np.nan
+            for level, is_present in zip(levels, present)
         ]
         rows.append(
             [
                 channel + 1,
-                PAIR_MAT[channel, 0],
-                PAIR_MAT[channel, 1],
+                pair_mat[channel, 0],
+                pair_mat[channel, 1],
                 plane_mean,
                 background_mean,
                 float(np.var(background)),
@@ -405,12 +800,247 @@ def grayscale_metrics(raw, targets):
                 float(np.percentile(background, 95)),
                 *responses,
                 *ratios,
-                int(np.all(gaps > 0)),
-                float(np.min(gaps)),
+                int(np.all(present_gaps > 0)),
+                float(np.min(present_gaps)) if present_gaps.size else np.nan,
                 *line_variances,
             ]
         )
     return np.asarray(rows, dtype=np.float64)
+
+
+EVALUATION_CHANNEL_HEADERS = (
+    "channel",
+    "structure_cosine",
+    "foreground_coverage_above_background_p95",
+    "grayscale_monotonic",
+    "grayscale_ratio_rmse",
+    "normalized_min_level_gap",
+    "S_1_3",
+    "S_2_3",
+    "S_1",
+    "background_cv",
+    "background_p95_ratio",
+    "background_row_cv",
+    "foreground_background_cnr",
+    "foreground_background_snr_db",
+)
+
+EVALUATION_SUMMARY_HEADERS = (
+    "structure_cosine_mean",
+    "structure_cosine_min",
+    "foreground_coverage_mean",
+    "foreground_coverage_min",
+    "grayscale_monotonic_channels",
+    "grayscale_ratio_rmse_mean",
+    "grayscale_ratio_rmse_max",
+    "S_1_3_mean",
+    "S_1_3_min",
+    "S_1_3_max",
+    "S_1_3_cv",
+    "S_2_3_mean",
+    "S_2_3_min",
+    "S_2_3_max",
+    "S_2_3_cv",
+    "S_1_mean",
+    "S_1_min",
+    "S_1_max",
+    "S_1_cv",
+    "background_cv_mean",
+    "background_cv_max",
+    "background_p95_ratio_mean",
+    "background_p95_ratio_max",
+    "background_row_cv_mean",
+    "background_row_cv_max",
+    "foreground_background_cnr_mean",
+    "foreground_background_cnr_min",
+    "foreground_background_snr_db_mean",
+    "foreground_background_snr_db_min",
+    "foreground_background_snr_db_max",
+)
+
+
+def evaluation_metrics(
+    raw,
+    targets,
+    desired_gray_ratios=(1 / 3, 2 / 3, 1.0),
+):
+    rows = []
+    epsilon = 1e-12
+    levels = np.asarray([1 / 3, 2 / 3, 1.0], dtype=np.float64)
+    desired_gray_ratios = np.asarray(desired_gray_ratios, dtype=np.float64)
+
+    for channel in range(targets.shape[0]):
+        target = targets[channel]
+        foreground_mask = target > 0
+        background_mask = target == 0
+        image = raw[channel].astype(np.float64, copy=False)
+        background = image[background_mask]
+        background_mean = float(np.mean(background))
+        background_std = float(np.std(background))
+        background_p95 = float(np.percentile(background, 95))
+        plane_mean = float(np.mean(image))
+        foreground_mean = float(np.mean(image[foreground_mask]))
+        foreground_background_cnr = (
+            foreground_mean - background_mean
+        ) / (background_std + epsilon)
+        foreground_background_snr_db = 20.0 * np.log10(
+            max(foreground_mean / (background_std + epsilon), epsilon)
+        )
+
+        positive_contrast = np.maximum(image - background_mean, 0.0)
+        target_shape = foreground_mask.astype(np.float64)
+        desired_target = np.zeros_like(target, dtype=np.float64)
+        for label, desired_ratio in zip(levels, desired_gray_ratios):
+            desired_target[np.isclose(target, label, rtol=0, atol=1e-6)] = (
+                desired_ratio
+            )
+        structure_contrast = positive_contrast.copy()
+        structure_contrast[foreground_mask] /= desired_target[foreground_mask]
+        structure_cosine = float(
+            np.sum(structure_contrast * target_shape)
+            / (
+                np.linalg.norm(structure_contrast.ravel())
+                * np.linalg.norm(target_shape.ravel())
+                + epsilon
+            )
+        )
+        foreground_coverage = float(
+            np.mean(image[foreground_mask] > background_p95)
+        )
+
+        present = np.asarray(
+            [
+                np.any(np.isclose(target, level, rtol=0, atol=1e-6))
+                for level in levels
+            ]
+        )
+        level_means = np.asarray(
+            [
+                np.mean(image[np.isclose(target, level, rtol=0, atol=1e-6)])
+                if is_present
+                else np.nan
+                for level, is_present in zip(levels, present)
+            ]
+        )
+        responses = (level_means - background_mean) / (plane_mean + epsilon)
+        present_responses = responses[present]
+        gaps = np.diff(present_responses)
+        grayscale_monotonic = int(np.all(gaps > 0))
+        if present[2]:
+            ratios = responses / (responses[2] + epsilon)
+            grayscale_ratio_rmse = float(
+                np.sqrt(
+                    np.mean(
+                        (ratios[present] - desired_gray_ratios[present]) ** 2
+                    )
+                )
+            )
+            normalized_min_gap = (
+                float(np.min(gaps) / (abs(responses[2]) + epsilon))
+                if gaps.size
+                else np.nan
+            )
+        else:
+            grayscale_ratio_rmse = np.nan
+            normalized_min_gap = np.nan
+
+        background_weights = background_mask.astype(np.float64)
+        row_counts = np.sum(background_weights, axis=1)
+        valid_rows = row_counts > 0
+        background_row_means = np.sum(
+            image * background_weights, axis=1
+        )[valid_rows] / row_counts[valid_rows]
+
+        rows.append(
+            [
+                channel + 1,
+                structure_cosine,
+                foreground_coverage,
+                grayscale_monotonic,
+                grayscale_ratio_rmse,
+                normalized_min_gap,
+                *responses,
+                background_std / (background_mean + epsilon),
+                background_p95 / (background_mean + epsilon),
+                float(np.std(background_row_means))
+                / (float(np.mean(background_row_means)) + epsilon),
+                foreground_background_cnr,
+                foreground_background_snr_db,
+            ]
+        )
+
+    channel_rows = np.asarray(rows, dtype=np.float64)
+    summary = {
+        "structure_cosine_mean": float(np.mean(channel_rows[:, 1])),
+        "structure_cosine_min": float(np.min(channel_rows[:, 1])),
+        "foreground_coverage_mean": float(np.mean(channel_rows[:, 2])),
+        "foreground_coverage_min": float(np.min(channel_rows[:, 2])),
+        "grayscale_monotonic_channels": int(np.sum(channel_rows[:, 3])),
+        "grayscale_ratio_rmse_mean": float(np.nanmean(channel_rows[:, 4])),
+        "grayscale_ratio_rmse_max": float(np.nanmax(channel_rows[:, 4])),
+    }
+    for column, name in zip((6, 7, 8), ("S_1_3", "S_2_3", "S_1")):
+        values = channel_rows[:, column]
+        summary[f"{name}_mean"] = float(np.nanmean(values))
+        summary[f"{name}_min"] = float(np.nanmin(values))
+        summary[f"{name}_max"] = float(np.nanmax(values))
+        summary[f"{name}_cv"] = float(
+            np.nanstd(values) / (abs(np.nanmean(values)) + epsilon)
+        )
+    for column, name in (
+        (9, "background_cv"),
+        (10, "background_p95_ratio"),
+        (11, "background_row_cv"),
+    ):
+        values = channel_rows[:, column]
+        summary[f"{name}_mean"] = float(np.mean(values))
+        summary[f"{name}_max"] = float(np.max(values))
+    cnr_values = channel_rows[:, 12]
+    snr_db_values = channel_rows[:, 13]
+    summary["foreground_background_cnr_mean"] = float(np.mean(cnr_values))
+    summary["foreground_background_cnr_min"] = float(np.min(cnr_values))
+    summary["foreground_background_snr_db_mean"] = float(np.mean(snr_db_values))
+    summary["foreground_background_snr_db_min"] = float(np.min(snr_db_values))
+    summary["foreground_background_snr_db_max"] = float(np.max(snr_db_values))
+    return channel_rows, summary
+
+
+def print_evaluation_summary(summary, channel_count):
+    print("五项结果评价:")
+    print(
+        "  结构完整: "
+        f"余弦相似度 mean/min={summary['structure_cosine_mean']:.4f}/"
+        f"{summary['structure_cosine_min']:.4f}, "
+        f"前景覆盖率 mean/min={summary['foreground_coverage_mean']:.4f}/"
+        f"{summary['foreground_coverage_min']:.4f}"
+    )
+    print(
+        "  灰度分级: "
+        f"单调通道={summary['grayscale_monotonic_channels']}/{channel_count}, "
+        f"比例RMSE mean/max={summary['grayscale_ratio_rmse_mean']:.4f}/"
+        f"{summary['grayscale_ratio_rmse_max']:.4f}"
+    )
+    print(
+        "  同灰度跨通道CV: "
+        f"1/3={summary['S_1_3_cv']:.4f}, "
+        f"2/3={summary['S_2_3_cv']:.4f}, 1={summary['S_1_cv']:.4f}"
+    )
+    print(
+        "  背景均匀: "
+        f"像素CV mean/max={summary['background_cv_mean']:.4f}/"
+        f"{summary['background_cv_max']:.4f}, "
+        f"P95/均值 mean/max={summary['background_p95_ratio_mean']:.4f}/"
+        f"{summary['background_p95_ratio_max']:.4f}, "
+        f"逐行CV mean/max={summary['background_row_cv_mean']:.4f}/"
+        f"{summary['background_row_cv_max']:.4f}"
+    )
+    print(
+        "  前景/背景分离: "
+        f"CNR mean/min={summary['foreground_background_cnr_mean']:.4f}/"
+        f"{summary['foreground_background_cnr_min']:.4f}, "
+        f"论文SNR(dB) mean/min={summary['foreground_background_snr_db_mean']:.2f}/"
+        f"{summary['foreground_background_snr_db_min']:.2f}"
+    )
 
 
 def save_comparison(targets, optimized_01, output_file, title):
@@ -423,12 +1053,12 @@ def save_comparison(targets, optimized_01, output_file, title):
     for channel in range(targets.shape[0]):
         row = channel // pairs_per_row
         column = (channel % pairs_per_row) * 2
-        for axis, image, title in (
+        for axis, image, panel_title in (
             (axes[row, column], targets[channel], f"Ch{channel + 1} Target"),
             (axes[row, column + 1], optimized_01[channel], f"Ch{channel + 1} Optimized"),
         ):
             axis.imshow(image, cmap="gray", vmin=0, vmax=1)
-            axis.set_title(title, fontsize=9)
+            axis.set_title(panel_title, fontsize=9)
             axis.axis("off")
 
     used_axes = targets.shape[0] * 2
@@ -445,6 +1075,11 @@ def main():
     args = parse_args()
     if args.epochs < 1:
         raise ValueError("epochs 必须大于 0。")
+    if args.order_grid_size < 1:
+        raise ValueError("order-grid-size 必须大于0。")
+    max_channels = args.order_grid_size ** 2
+    if not 1 <= args.channel_count <= max_channels:
+        raise ValueError(f"channel-count 必须在 1 到 {max_channels} 之间。")
     if args.log_interval < 1:
         raise ValueError("log-interval 必须大于 0。")
     if args.brightness_consistency_weight < 0:
@@ -461,22 +1096,77 @@ def main():
         "background_uniformity_weight",
         "reference_q",
         "background_row_uniformity_weight",
+        "background_band_weight",
+        "background_band_lower",
+        "background_band_upper",
+        "background_cluster_weight",
+        "background_cluster_kernel",
+        "background_cluster_upper",
+        "foreground_efficiency_weight",
+        "foreground_background_cnr_weight",
+        "paper_snr_weight",
+        "structure_completeness_weight",
+        "gray_ratio_weight",
     ):
         if getattr(args, option_name) < 0:
             raise ValueError(f"{option_name} 不能小于 0。")
+    if args.background_band_upper > 0 and args.background_band_lower > args.background_band_upper:
+        raise ValueError("background-band-lower 不能大于 background-band-upper。")
+    if args.background_band_weight > 0 and args.background_band_upper <= 0:
+        raise ValueError("启用 background-band-weight 时必须提供正的 background-band-upper。")
+    if args.background_cluster_weight > 0 and args.background_cluster_upper <= 0:
+        raise ValueError("启用 background-cluster-weight 时必须提供正的 background-cluster-upper。")
+    if args.background_cluster_kernel < 3 or args.background_cluster_kernel % 2 == 0:
+        raise ValueError("background-cluster-kernel 必须为大于等于 3 的奇数。")
+    if args.paper_snr_target_db <= 0:
+        raise ValueError("paper-snr-target-db 必须大于0。")
+    if args.image_loss_mode == "balanced":
+        if args.foreground_loss_weight <= 0 or args.background_loss_weight <= 0:
+            raise ValueError("balanced 图案损失的前景和背景权重必须为正数。")
+    desired_gray_ratios = np.asarray(
+        [*args.desired_gray_ratios, 1.0], dtype=np.float32
+    )
+    if not 0 < desired_gray_ratios[0] < desired_gray_ratios[1] < 1:
+        raise ValueError("desired-gray-ratios 必须满足 0 < LOW < MID < 1。")
 
     device = select_device(args.device)
-    targets_np = load_targets(args.mat_file)
+    targets_np = load_targets(args.mat_file, max_channels=max_channels)
+    grid_positions_np = load_grid_positions(
+        args.mat_file, targets_np.shape[0], grid_size=args.order_grid_size
+    )
+    if args.channel_count > targets_np.shape[0]:
+        raise ValueError(
+            f"channel-count={args.channel_count} 超过输入目标通道数{targets_np.shape[0]}。"
+        )
+    targets_np = targets_np[: args.channel_count]
+    grid_positions_np = grid_positions_np[: args.channel_count]
     targets = torch.tensor(targets_np, device=device)
-    pair_mat = torch.tensor(PAIR_MAT, dtype=torch.float32, device=device)
-    weights = torch.tensor(CUSTOM_WEIGHTS, dtype=torch.float32, device=device)
+    pair_mat_np = build_order_pairs(
+        grid_positions_np, args.order_m_start, args.order_n_start
+    )
+    pair_mat = torch.tensor(pair_mat_np, dtype=torch.float32, device=device)
+    weights_np = build_channel_weights(
+        args.channel_count,
+        priority_channels=args.priority_channels,
+        priority_weight=args.priority_channel_weight,
+    )
+    weights = torch.tensor(weights_np, dtype=torch.float32, device=device)
 
     print(f"Device: {device}")
     print(f"Targets: {targets_np.shape}, values: 0, 1/3, 2/3, 1")
+    print(
+        "Desired gray responses: "
+        + ":".join(f"{value:g}" for value in desired_gray_ratios)
+    )
+    if args.priority_channels:
+        print(
+            "Priority channels: "
+            f"{list(args.priority_channels)}, weight={args.priority_channel_weight:g}"
+        )
 
     size = targets_np.shape[-1]
     if args.initial_results is None:
-        torch.manual_seed(42)
+        torch.manual_seed(args.seed)
         phdx = (
             torch.rand((size, size), device=device) * 2 * np.pi
         ).requires_grad_()
@@ -511,6 +1201,13 @@ def main():
     worst_level_loss_history = []
     background_uniformity_loss_history = []
     background_row_uniformity_loss_history = []
+    background_band_loss_history = []
+    background_cluster_loss_history = []
+    structure_completeness_loss_history = []
+    gray_ratio_loss_history = []
+    foreground_background_cnr_loss_history = []
+    paper_snr_loss_history = []
+    paper_snr_min_db_history = []
     started_at = time.time()
     for epoch in range(1, args.epochs + 1):
         optimizer.zero_grad()
@@ -530,6 +1227,13 @@ def main():
             worst_level_loss,
             background_uniformity_loss,
             background_row_uniformity_loss,
+            background_band_loss,
+            background_cluster_loss,
+            structure_completeness_loss,
+            gray_ratio_loss,
+            foreground_background_cnr_loss_value,
+            paper_snr_loss_value,
+            paper_snr_min_db,
         ) = total_cost(
             phdx,
             phdy,
@@ -547,6 +1251,22 @@ def main():
             background_uniformity_weight=args.background_uniformity_weight,
             reference_q=args.reference_q,
             background_row_uniformity_weight=args.background_row_uniformity_weight,
+            background_band_weight=args.background_band_weight,
+            background_band_lower=args.background_band_lower,
+            background_band_upper=args.background_band_upper,
+            background_cluster_weight=args.background_cluster_weight,
+            background_cluster_kernel=args.background_cluster_kernel,
+            background_cluster_upper=args.background_cluster_upper,
+            image_loss_mode=args.image_loss_mode,
+            foreground_loss_weight=args.foreground_loss_weight,
+            background_loss_weight=args.background_loss_weight,
+            foreground_efficiency_weight=args.foreground_efficiency_weight,
+            foreground_background_cnr_weight=args.foreground_background_cnr_weight,
+            paper_snr_weight=args.paper_snr_weight,
+            paper_snr_target_db=args.paper_snr_target_db,
+            structure_completeness_weight=args.structure_completeness_weight,
+            gray_ratio_weight=args.gray_ratio_weight,
+            desired_gray_ratios=desired_gray_ratios,
         )
         loss.backward()
         optimizer.step()
@@ -568,13 +1288,28 @@ def main():
         background_row_uniformity_loss_history.append(
             background_row_uniformity_loss.item()
         )
+        background_band_loss_history.append(background_band_loss.item())
+        background_cluster_loss_history.append(background_cluster_loss.item())
+        structure_completeness_loss_history.append(
+            structure_completeness_loss.item()
+        )
+        gray_ratio_loss_history.append(gray_ratio_loss.item())
+        foreground_background_cnr_loss_history.append(
+            foreground_background_cnr_loss_value.item()
+        )
+        paper_snr_loss_history.append(paper_snr_loss_value.item())
+        paper_snr_min_db_history.append(paper_snr_min_db.item())
         if epoch == 1 or epoch % args.log_interval == 0 or epoch == args.epochs:
             print(
                 f"[Epoch {epoch}/{args.epochs}] Loss={loss.item():.6e} "
                 f"BrightCV={brightness_cv.item():.4f} "
                 f"Worst/Mean={worst_channel_ratio.item():.4f} "
                 f"BgVar={background_uniformity_loss.item():.4f} "
-                f"BgRowVar={background_row_uniformity_loss.item():.4f}"
+                f"BgRowVar={background_row_uniformity_loss.item():.4f} "
+                f"BgBand={background_band_loss.item():.4f}"
+                f" BgCluster={background_cluster_loss.item():.4f}"
+                f" CNRLoss={foreground_background_cnr_loss_value.item():.4f}"
+                f" PaperSNRmin={paper_snr_min_db.item():.2f}dB"
             )
 
     print(f"优化完成，用时 {time.time() - started_at:.1f} 秒")
@@ -582,21 +1317,27 @@ def main():
     output_dir = args.output_dir
     if output_dir is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = Path(__file__).resolve().parent / f"results_23channels_{timestamp}"
+        output_dir = Path(__file__).resolve().parent / f"results_36channels_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=False)
 
     optimized_raw, optimized_01, optimized_global_01 = reconstruct(
         phdx, phdy, pair_mat
     )
-    metrics = channel_metrics(optimized_raw, targets_np)
-    grayscale_level_metrics = grayscale_metrics(optimized_raw, targets_np)
+    metrics = channel_metrics(optimized_raw, targets_np, pair_mat_np)
+    grayscale_level_metrics = grayscale_metrics(optimized_raw, targets_np, pair_mat_np)
+    evaluation_channel_metrics, evaluation_summary = evaluation_metrics(
+        optimized_raw,
+        targets_np,
+        desired_gray_ratios=desired_gray_ratios,
+    )
     np.savez_compressed(
         output_dir / "optimized_results.npz",
         phdx=phdx.detach().cpu().numpy(),
         phdy=phdy.detach().cpu().numpy(),
         costs=np.asarray(costs),
-        pairMat=PAIR_MAT,
-        weights=np.asarray(CUSTOM_WEIGHTS),
+        pairMat=pair_mat_np,
+        grid_positions=grid_positions_np,
+        weights=weights.cpu().numpy(),
         targets=targets_np,
         optimized_raw=optimized_raw,
         optimized_01=optimized_01,
@@ -619,6 +1360,17 @@ def main():
         background_row_uniformity_loss_history=np.asarray(
             background_row_uniformity_loss_history
         ),
+        background_band_loss_history=np.asarray(background_band_loss_history),
+        background_cluster_loss_history=np.asarray(background_cluster_loss_history),
+        structure_completeness_loss_history=np.asarray(
+            structure_completeness_loss_history
+        ),
+        gray_ratio_loss_history=np.asarray(gray_ratio_loss_history),
+        foreground_background_cnr_loss_history=np.asarray(
+            foreground_background_cnr_loss_history
+        ),
+        paper_snr_loss_history=np.asarray(paper_snr_loss_history),
+        paper_snr_min_db_history=np.asarray(paper_snr_min_db_history),
         brightness_consistency_weight=args.brightness_consistency_weight,
         worst_channel_weight=args.worst_channel_weight,
         level_weight=args.level_weight,
@@ -630,6 +1382,26 @@ def main():
         background_uniformity_weight=args.background_uniformity_weight,
         reference_q=args.reference_q,
         background_row_uniformity_weight=args.background_row_uniformity_weight,
+        background_band_weight=args.background_band_weight,
+        background_band_lower=args.background_band_lower,
+        background_band_upper=args.background_band_upper,
+        background_cluster_weight=args.background_cluster_weight,
+        background_cluster_kernel=args.background_cluster_kernel,
+        background_cluster_upper=args.background_cluster_upper,
+        image_loss_mode=args.image_loss_mode,
+        foreground_loss_weight=args.foreground_loss_weight,
+        background_loss_weight=args.background_loss_weight,
+        foreground_efficiency_weight=args.foreground_efficiency_weight,
+        foreground_background_cnr_weight=args.foreground_background_cnr_weight,
+        paper_snr_weight=args.paper_snr_weight,
+        paper_snr_target_db=args.paper_snr_target_db,
+        structure_completeness_weight=args.structure_completeness_weight,
+        gray_ratio_weight=args.gray_ratio_weight,
+        priority_channels=np.asarray(args.priority_channels, dtype=np.int16),
+        priority_channel_weight=args.priority_channel_weight,
+        desired_gray_ratios=desired_gray_ratios,
+        channel_count=args.channel_count,
+        seed=args.seed,
     )
     np.savetxt(
         output_dir / "channel_brightness_metrics.csv",
@@ -654,6 +1426,20 @@ def main():
         ),
         comments="",
     )
+    np.savetxt(
+        output_dir / "evaluation_channel_metrics.csv",
+        evaluation_channel_metrics,
+        delimiter=",",
+        header=",".join(EVALUATION_CHANNEL_HEADERS),
+        comments="",
+    )
+    np.savetxt(
+        output_dir / "evaluation_summary.csv",
+        np.asarray([[evaluation_summary[name] for name in EVALUATION_SUMMARY_HEADERS]]),
+        delimiter=",",
+        header=",".join(EVALUATION_SUMMARY_HEADERS),
+        comments="",
+    )
     comparison_file = output_dir / "target_vs_optimized_0_1.png"
     save_comparison(
         targets_np,
@@ -672,6 +1458,8 @@ def main():
     print(f"对比图: {comparison_file}")
     print(f"统一曝光对比图: {global_comparison_file}")
     print(f"逐通道亮度指标: {output_dir / 'channel_brightness_metrics.csv'}")
+    print_evaluation_summary(evaluation_summary, targets_np.shape[0])
+    print(f"五项评价汇总: {output_dir / 'evaluation_summary.csv'}")
     print("流程已结束：未生成相位 CSV、CIF 或后续仿真内容。")
 
 

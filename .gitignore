@@ -1,5 +1,8 @@
 __pycache__/
 *.py[cod]
 
-output/*
-!output/README.md
+input/
+output/
+tmp/
+.pytest_cache/
+github_export_gray_new_optimizer/

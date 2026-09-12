@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-CHANNEL_COUNT = 23
+CHANNEL_COUNT = 36
 IMAGE_SIZE = 500
 LINE_LENGTH = 200
 LINE_WIDTH = 5
@@ -63,7 +63,7 @@ def save_preview(targets, output_file):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="生成 23 通道三线四标签灰度校准目标。"
+        description="生成36通道三线四标签灰度校准目标。"
     )
     parser.add_argument(
         "--output-dir",

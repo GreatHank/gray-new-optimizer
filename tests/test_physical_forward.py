@@ -53,14 +53,51 @@ class PhysicalForwardRegressionTests(unittest.TestCase):
             atol=2e-10,
         )
 
-    def test_all_23_channels_use_the_same_two_phase_arrays(self):
-        self.assertEqual(forward_model.PAIR_MAT.shape, (23, 2))
-        self.assertEqual(len(forward_model.CUSTOM_WEIGHTS), 23)
-        self.assertEqual(len(np.unique(forward_model.PAIR_MAT, axis=0)), 23)
+    def test_all_36_channels_use_the_same_two_phase_arrays(self):
+        self.assertEqual(forward_model.PAIR_MAT.shape, (36, 2))
+        self.assertEqual(len(forward_model.CUSTOM_WEIGHTS), 36)
+        self.assertEqual(len(np.unique(forward_model.PAIR_MAT, axis=0)), 36)
+        self.assertTrue(np.all((forward_model.PAIR_MAT >= 1) & (forward_model.PAIR_MAT <= 6)))
+        np.testing.assert_array_equal(forward_model.CUSTOM_WEIGHTS, np.ones(36))
 
         raw = self._reference_intensity()
-        self.assertEqual(raw.shape, (23, 8, 8))
+        self.assertEqual(raw.shape, (36, 8, 8))
 
+    def test_continuous_order_block_can_start_in_second_quadrant(self):
+        grid_positions = np.array([[0, 1], [2, 6], [6, 0]], dtype=np.int16)
+
+        order_pairs = forward_model.build_order_pairs(
+            grid_positions, m_start=-9, n_start=3
+        )
+
+        np.testing.assert_array_equal(
+            order_pairs,
+            np.array([[-9, 4], [-7, 9], [-3, 3]], dtype=np.int16),
+        )
+
+    def test_requested_no_zero_6x6_block_has_exact_row_major_pairs(self):
+        grid_positions = np.asarray([divmod(index, 6) for index in range(36)])
+
+        order_pairs = forward_model.build_order_pairs(
+            grid_positions, m_start=-6, n_start=-3
+        )
+
+        expected = np.asarray(
+            [(m, n) for m in range(-6, 0) for n in range(-3, 3)]
+        )
+        np.testing.assert_array_equal(order_pairs, expected)
+        self.assertFalse(np.any(np.all(order_pairs == 0, axis=1)))
+
+    def test_butterfly_4x4_block_has_exact_m_priority_pairs(self):
+        grid_positions = np.asarray([divmod(index, 4) for index in range(16)])
+
+        order_pairs = forward_model.build_order_pairs(
+            grid_positions, m_start=1, n_start=1
+        )
+
+        expected = np.asarray([(m, n) for m in range(1, 5) for n in range(1, 5)])
+        np.testing.assert_array_equal(order_pairs, expected)
+        self.assertFalse(np.any(np.all(order_pairs == 0, axis=1)))
 
 if __name__ == "__main__":
     unittest.main()
