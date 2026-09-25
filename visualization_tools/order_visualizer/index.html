@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="本地衍射级次选择、图片分割与视场可视化工具" />
+    <title>级次视场工作台</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2308131f'/%3E%3Ccircle cx='16' cy='16' r='10' fill='none' stroke='%235eead4' stroke-width='2'/%3E%3Cpath d='M10 10h12v12H10z' fill='none' stroke='%23f8fafc' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='2' fill='%23fbbf24'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">DIFFRACTION ORDER STUDIO</p>
+          <h1>级次视场工作台</h1>
+        </div>
+        <div class="status-pill"><span></span>本地计算 · 图片不上传</div>
+      </header>
+
+      <section class="workspace">
+        <aside class="control-panel" aria-label="参数控制区">
+          <section class="control-section">
+            <div class="panel-heading">
+              <span class="step-index">01</span>
+              <div><h2>载入与分割</h2><p>图片按行优先等分，分别进入连续级次。</p></div>
+            </div>
+            <label class="upload-box" id="uploadBox" for="imageInput">
+              <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.bmp,.svg" />
+              <span class="upload-icon" aria-hidden="true">↗</span>
+              <strong id="uploadTitle">选择或拖入本地图片</strong>
+              <small>PNG、JPG、WEBP、GIF、BMP、SVG</small>
+            </label>
+            <div class="source-preview" id="sourcePreview" hidden>
+              <canvas id="sourceCanvas" aria-label="原图分割预览"></canvas>
+              <div><strong id="fileName"></strong><span id="imageSize"></span></div>
+            </div>
+            <p class="error-message" id="errorMessage" role="alert" aria-live="polite"></p>
+          </section>
+
+          <section class="control-section">
+            <div class="panel-heading">
+              <span class="step-index">02</span>
+              <div><h2>级次与器件</h2><p>默认沿用此前验证的 3×3 参数。</p></div>
+            </div>
+            <div class="field-grid">
+              <label class="field"><span>波长 λ <em>nm</em></span><input id="wavelength" type="number" value="480" min="0.01" step="1" /></label>
+              <label class="field"><span>周期 P <em>nm</em></span><input id="period" type="number" value="2000" min="0.01" step="10" /></label>
+              <label class="field field-wide"><span>Channel 数 <em>仅完全平方数</em></span><select id="channels" aria-label="Channel 数"></select></label>
+              <label class="field"><span>m 起始级次</span><input id="mStart" type="number" value="-3" step="1" /></label>
+              <label class="field"><span>n 起始级次</span><input id="nStart" type="number" value="-3" step="1" /></label>
+            </div>
+          </section>
+
+          <section class="control-section">
+            <div class="panel-heading compact-heading">
+              <span class="step-index">03</span>
+              <div><h2>共同入射角</h2><p>拖动滑块或直接键入角度。</p></div>
+            </div>
+            <div class="angle-control">
+              <div class="angle-label"><span>极角 θ</span><small>从表面法线量起</small></div>
+              <div class="angle-input-row"><input id="thetaRange" type="range" min="0" max="89.9" step="0.01" value="42.7517" /><div class="number-suffix"><input id="thetaNumber" type="number" min="0" max="89.9" step="0.01" value="42.7517" /><span>°</span></div></div>
+            </div>
+            <div class="angle-control">
+              <div class="angle-label"><span>方位角 φ</span><small>+x 朝 +y</small></div>
+              <div class="angle-input-row"><input id="phiRange" type="range" min="-180" max="180" step="0.01" value="45" /><div class="number-suffix"><input id="phiNumber" type="number" min="-180" max="180" step="0.01" value="45" /><span>°</span></div></div>
+            </div>
+            <button class="center-button" id="centerButton" type="button">
+              <span>自动居中图像</span>
+              <small>反算并更新 θ、φ</small>
+            </button>
+          </section>
+
+          <details class="advanced-panel">
+            <summary>高级物理参数</summary>
+            <div class="field-grid">
+              <label class="field"><span>入射折射率 n<sub>in</sub></span><input id="nIn" type="number" value="1" min="0.01" step="0.01" /></label>
+              <label class="field"><span>输出折射率 n<sub>out</sub></span><input id="nOut" type="number" value="1" min="0.01" step="0.01" /></label>
+              <label class="field field-wide"><span>数值孔径 NA <em>≤ n<sub>out</sub></em></span><input id="na" type="number" value="1" min="0.01" step="0.01" /></label>
+              <label class="field field-wide"><span>图片底图透明度 <em id="opacityValue">34%</em></span><input id="imageOpacity" type="range" value="34" min="5" max="85" step="1" /></label>
+            </div>
+          </details>
+
+          <div class="action-row">
+            <button class="button secondary" id="resetButton" type="button">恢复默认</button>
+            <button class="button primary" id="exportButton" type="button">导出图片</button>
+          </div>
+        </aside>
+
+        <section class="visual-panel" aria-label="级次可视化区">
+          <div class="visual-header">
+            <div><p class="section-kicker">传播空间预览</p><h2 id="gridTitle">3 × 3 连续级次</h2><p class="visual-subtitle" id="orderRange">m = −3…−1，n = −3…−1</p></div>
+            <div class="fov-card"><span>标称圆形 FoV</span><strong id="fovValue">42.20°</strong><small id="fovAxis">横向 42.20° · 纵向 42.20°</small></div>
+          </div>
+
+          <div class="metrics-row" aria-label="关键计算结果">
+            <article><span>传播中心</span><strong id="propagatingMetric">9 / 9</strong></article>
+            <article><span>NA 收集</span><strong id="capturedMetric">9 / 9</strong></article>
+            <article><span>全视场候选级次</span><strong id="candidateMetric">—</strong></article>
+            <article><span>级次间距 Δu</span><strong id="deltaMetric">0.2400</strong></article>
+            <article><span>最小空气余量</span><strong id="marginMetric">0.6606</strong></article>
+          </div>
+
+          <p class="paper-note">论文大视场口径：每个级次代表一块局部 FFT 角谱，而不是单独一个点；相邻角谱块拼接后再与空气传播圆相交。图中浅灰方格是未选级次，虚线方格表示只有部分角谱进入传播圆。</p>
+
+          <div class="canvas-wrap" id="canvasWrap">
+            <canvas id="orderCanvas" aria-label="衍射级次分布图"></canvas>
+            <div class="canvas-placeholder" id="canvasPlaceholder"><span>9</span><p>载入图片后，每个切片会以浅色底图显示在对应的正方形级次格内。</p></div>
+            <div class="plot-tooltip" id="plotTooltip" hidden></div>
+          </div>
+
+          <footer class="legend-bar">
+            <span><i class="legend-dot captured"></i>NA 内</span>
+            <span><i class="legend-dot propagating"></i>仅传播</span>
+            <span><i class="legend-dot evanescent"></i>不可传播</span>
+            <span><i class="legend-line square"></i>已选图片级次</span>
+            <span><i class="legend-line candidate"></i>未选候选级次</span>
+            <span><i class="legend-line partial"></i>角谱部分入圆</span>
+            <span><i class="legend-line circle"></i>空气传播圆</span>
+          </footer>
+
+          <section class="detail-section">
+            <div class="section-title-row"><div><p class="section-kicker">ORDER DETAILS</p><h2>全视场级次明细</h2></div><p>表格包含传播圆内所有候选角谱块；“未选”级次也可在图上点击查看。</p></div>
+            <div class="table-wrap">
+              <table><thead><tr><th>Ch.</th><th>选择</th><th>级次 (m,n)</th><th>u<sub>x</sub></th><th>u<sub>y</sub></th><th>出射 θ</th><th>角谱块</th><th>中心状态</th></tr></thead><tbody id="orderTableBody"></tbody></table>
+            </div>
+          </section>
+
+          <section class="parameter-guide">
+            <div><p class="section-kicker">PARAMETER GUIDE</p><h2>参数会怎样影响结果</h2></div>
+            <div class="guide-grid">
+              <article><strong>周期 P</strong><p>P 越小，级次间距和 FoV 越大，但外围级次更容易跑出传播圆。</p></article>
+              <article><strong>波长 λ</strong><p>λ 越大，效果与减小 P 类似：级次更分散，FoV 增大。</p></article>
+              <article><strong>θ 与 φ</strong><p>改变整组级次在圆内的位置；θ 控制偏移量，φ 控制偏移方向。</p></article>
+              <article><strong>折射率</strong><p>空气默认为 1。n<sub>in</sub>影响入射平移，n<sub>out</sub>影响输出方向余弦和 FoV。</p></article>
+              <article><strong>NA</strong><p>表示系统实际能收集多大角度。空气中最大通常为 1；越小，能收集的级次越少。</p></article>
+              <article><strong>Channel 数</strong><p>N² 个 channel 会把原图等分为 N×N，并扩大角谱拼接宽度与标称 FoV。</p></article>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,8 +1,6 @@
 __pycache__/
 *.py[cod]
 
-input/
 output/
 tmp/
 .pytest_cache/
-github_export_gray_new_optimizer/

@@ -10,6 +10,8 @@
 
 ## 当前能力
 
+- 提供本地“级次视场工作台”：选择浏览器可读取的本地图片后，按完全平方数 channel 等分，将每个切片按原图方向拼接为浅色级次底图；Channel 数使用仅含 `4、9、16…400` 的完全平方数下拉框，不接受任意数字。支持共同入射角滑动/键入、一键反算 `theta/phi` 自动居中、物理参数联动、FoV 与传播/NA 统计、PNG 导出，并同时枚举空气圆内所有未选择候选级次及边缘部分相交的局部角谱块。数值输入采用短延迟更新，全视场扫描超过2500格时会明确报错，以免极小 `lambda/P` 在输入过程中卡死页面。默认沿用 `easy_picture` 的 3×3 参数。详见 [级次选择可视化网站](doc/order-visualizer-site.md)。
+- 已按公开补充材料复算李仲阳团队大视场论文实例：23通道参数可严格复现23/23传播及Table S3出射角；Sample 3的`87°`可解释为未占满完整3×3角谱区域后的实际FoV；`168°`和近`180°`实例因公开参数不完整而明确标为不可严格复跑。详见 [论文实例参数复算](doc/li-zhongyang-paper-example-reproduction.md)。
 - 针对 `input/easy_picture.png` 完成 Figure S9 风格连续3×3“钟表式”级次搜索：整幅图只做identity/旋转/镜像后切块，严格排除 `(0,0)`，并输出复杂度排名、共同入射传播表、局部角谱方格余量及9-channel MAT。详见 [easy_picture 3×3级次分析](doc/easy-picture-3x3-clock-order-analysis.md)。
 
 - 从 MAT 文件读取1–49个正方形通道、标签为 `0/1` 或 `0、1/3、2/3、1` 的目标 `bw_all`。
@@ -37,6 +39,7 @@
 ## 技术栈与环境
 
 - Python 3
+- 原生 HTML、CSS、JavaScript（本地级次可视化网站，无前端依赖）
 - NumPy、SciPy、PyTorch、Matplotlib
 - MATLAB（仅 `mask_generate.m`）
 - CUDA 可选；主脚本也支持 CPU
@@ -54,8 +57,9 @@ gray_new/
 ├─ coding/
 │  ├─ python/               # 优化、目标生成、权重计算和结果可视化脚本
 │  └─ matlab/               # 相位到 CIF 掩模转换脚本
+├─ visualization_tools/     # 可独立运行的可视化小工具
+│  └─ order_visualizer/     # 级次选择可视化网站
 ├─ tests/                   # 固定前向和校准目标回归测试
-├─ teach/                   # CV优先损失方案的简洁教学课程与速查资料
 ├─ input/                   # 原始输入数据
 │  ├─ grayscale_image.mat
 │  ├─ thin_letter_reference.png
@@ -66,6 +70,20 @@ gray_new/
 `input/` 与 `output/` 严格分离：用户提供的原图或 MAT 数据只放入 `input/`；目标 MAT、训练结果、指标和预览图只放入 `output/`。2026-08-31 已按用户要求清空旧 `output/`，因此下文早期实验路径仅作为历史指标记录，文件本身已不存在；当前磁盘只保留本轮几何线稿实验产物。
 
 ## 运行方式
+
+### 本地级次选择可视化网站
+
+在项目根目录启动静态服务器：
+
+```powershell
+python -m http.server 4173 --directory visualization_tools/order_visualizer
+```
+
+浏览器打开 `http://127.0.0.1:4173/`。图片仅在浏览器内读取，不上传到网络。默认值为 `channel=9`、`lambda=480 nm`、`P=2000 nm`、`m,n=-3…-1`、`theta=42.7517°`、`phi=45°`、`n_in=n_out=1`、`NA=1`，标称圆形 FoV 约 `42.20°`。channel 只能从 `4、9、16…400` 的完全平方数下拉列表选择。
+
+网站只按每个已选级次的正方形方格裁剪图片；空气传播圆和 NA 圆作为物理范围参考，不裁剪图片。同时显示所有与空气圆相交的未选局部角谱方格，并在图和表中区分完整入圆、部分入圆和级次中心状态。公式、参数含义和边界见 [级次选择可视化网站](doc/order-visualizer-site.md)。
+
+### 优化流程
 
 在项目根目录运行主优化流程：
 
@@ -171,8 +189,6 @@ python coding/python/order_decoupling_grayscale.py `
 
 每次优化结束还会生成 `evaluation_channel_metrics.csv` 和 `evaluation_summary.csv`，并在终端打印五项评价。指标定义和读法见 [优化结果评价指标](doc/evaluation-metrics.md)。
 
-CV优先方案的简洁课程见 [CV优先灰度损失课程](teach/lessons/0001-cv-priority-loss.html)，公式速查见 [损失速查页](teach/reference/loss-map.html)。
-
 水果目标从随机相位起跑时，先保持灰度、线内均匀性和背景辅助损失为默认的 `0`。旧的 `balanced` 加多项辅助损失组合会在早期压过图案主损失，使三档比例数值看似正确但整体亮度塌缩。基础图案收敛后如需改善跨通道亮度或背景，再从已有结果热启动并逐项增加约束。
 
 背景亮度带实验不针对横向纹理，而是对所有背景像素统一计算 `I / 全平面均值` 的越界惩罚。只限制亮斑时使用 `--background-band-lower 0 --background-band-upper 1.0`；同时限制过亮和过暗区域时，例如使用 `--background-band-lower 0.6 --background-band-upper 1.0`。两种方案的权重由 `--background-band-weight` 控制。
@@ -192,6 +208,7 @@ CV优先方案的简洁课程见 [CV优先灰度损失课程](teach/lessons/0001
 ```powershell
 python coding/python/calculate_weight.py
 python coding/python/show_save_img.py
+python coding/python/reproduce_li_zhongyang_fov_examples.py
 ```
 
 优化前检查一张四灰度源图是否适合按6×6切成36个channel：
@@ -319,6 +336,7 @@ MAT输入必须包含 `bw_all`，默认6×6模式允许1–36个通道，7×7模
 
 ## 已知限制与风险
 
+- 本地网站是二维光栅方程与图片—级次映射的交互可视化，不执行共享相位优化，也不代表器件效率、串扰或 FDTD/RCWA 结果。当前页面使用单一等向周期 `P_x=P_y=P`；浏览器不能解码的 TIFF 等格式需先转成 PNG、JPG 或 WEBP。
 - 当前默认级次为第一象限 `(1,1)…(6,6)` 共36项，基础损失权重统一为1；旧23通道MAT仍可显式使用 `--channel-count 23`。
 - 7×7模式可通过`--order-grid-size 7`启用，最多49个连续级次；圆形目标当前有45个非空通道。级次起点默认仍为正级次 `(1,1)`，也可显式平移到其他象限。连续方阵可能包含整数倍谐波耦合，是否优于6×6必须以实际结构、CV和物理传播验证共同判断。
 - 级次验证器只做光栅方程层面的传播、NA收集、逐级次居中入射反算和严格相位关系筛选；“运动学可行”不等于“已独立解耦”。真实效率、串扰、偏振、材料损耗和结构共振仍需联合优化以及RCWA/FDTD。仓库中的850 nm可能是纳米单元间距而非有效衍射周期，尚未确认。
