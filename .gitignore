@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 
-output/
+/input/
+/output/
 tmp/
 .pytest_cache/
+~$*

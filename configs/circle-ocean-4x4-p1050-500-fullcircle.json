@@ -1,0 +1,56 @@
+{
+  "name": "circle-ocean-4x4-p1050-500-fullcircle",
+  "claim_scope": "shared_detour_fft_plus_spatial_PP; scalar_software_and_common_incidence_geometry",
+  "optimizer": {
+    "mat_file": "output/targets/circle_ocean_fullcircle_4x4_p1050_gray256_500/target.mat",
+    "optimizer_name": "adam",
+    "epochs": 25000,
+    "lr": 0.001,
+    "seed": 43,
+    "gray_level_count": 256,
+    "device": "auto",
+    "log_interval": 500,
+    "strict_physics": true,
+    "gray_consistency_weight": 1.0
+  },
+  "physics": {
+    "scope": "user_screenshot_grid_plus_shared_PP; scalar_geometry_only",
+    "source": "User screenshot: 4x4 orders starting at (-2,-2), P=1050 nm, theta=20.9938 deg, phi=45 deg",
+    "wavelength_nm": 532.0,
+    "period_x_nm": 1050,
+    "period_y_nm": 1050,
+    "n_in": 1.0,
+    "n_out": 1.0,
+    "na": 1.0,
+    "incident_theta_deg": 20.9938,
+    "incident_azimuth_deg": 45,
+    "common_incidence": true,
+    "device_configuration_verified": false,
+    "layout_requirements": {
+      "max_order_count": 16
+    },
+    "strict_require": [
+      "order_count",
+      "all_cells_intersect_propagation",
+      "actual_target_support"
+    ],
+    "square_target_scope": "Explicit circular target fills the physical field circle. All complete FFT planes remain in optimization and metrics; propagation masks only affect display."
+  },
+  "target": {
+    "source": "input/circle_ocean_gray.png",
+    "tile_size": 500,
+    "grid_size": 4,
+    "order_m_start": -2,
+    "order_n_start": -2,
+    "excluded_canvas_positions": [],
+    "source_circle": {
+      "center_px": [
+        620.353563,
+        616.775373
+      ],
+      "radius_px": 621.16,
+      "outside_background_max_gray": 2
+    },
+    "layout_label": "4 x 4"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "cosmic-spiral-pp-full30-energy",
+  "claim_scope": "scalar_paper_detour_fft_with_shared_pp_extension_and_theoretical_geometry",
+  "optimizer": {
+    "mat_file": "output/targets/cosmic_spiral_pp_full30/target.mat",
+    "epochs": 200,
+    "lr": 0.02,
+    "seed": 43,
+    "channel_count": 30,
+    "order_grid_size": 6,
+    "order_m_start": -4,
+    "order_n_start": -4,
+    "image_loss_mode": "energy",
+    "device": "cuda",
+    "log_interval": 100,
+    "output_level": "standard",
+    "strict_physics": true
+  },
+  "physics": {
+    "scope": "scalar_paper_detour_fft_with_shared_pp_extension_and_theoretical_geometry",
+    "source": "paper Eq.(1), Fig.3e; shared PP is the user-approved model extension",
+    "wavelength_nm": 488.0,
+    "period_x_nm": 2800.0,
+    "period_y_nm": 2800.0,
+    "n_in": 1.0,
+    "n_out": 1.0,
+    "na": 1.0,
+    "incident_theta_deg": 20.399962175970764,
+    "incident_azimuth_deg": 0.0,
+    "common_incidence": true,
+    "nominal_cell_half_diagonal_u": 0.12323861043536971,
+    "actual_support_radius_u": 0.12323861043536971,
+    "support_definition": "conservative half-diagonal bound of the complete FFT Nyquist cell",
+    "device_configuration_verified": false,
+    "strict_require": [
+      "all_centers_propagating",
+      "all_centers_captured",
+      "actual_target_support"
+    ]
+  }
+}

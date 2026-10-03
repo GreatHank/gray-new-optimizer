@@ -1,0 +1,48 @@
+{
+  "name": "cosmic-spiral-pp-symmetric25-gray256-256-rmse",
+  "claim_scope": "paper_shared_detour_fft_plus_spatial_PP; wide_angle_scalar_layout",
+  "optimizer": {
+    "mat_file": "output/targets/cosmic_spiral_pp_symmetric25_gray256_256/target.mat",
+    "epochs": 1000,
+    "lr": 0.02,
+    "seed": 43,
+    "gray_level_count": 256,
+    "channel_count": 25,
+    "order_grid_size": 5,
+    "order_m_start": -2,
+    "order_n_start": -2,
+    "image_loss_mode": "rmse",
+    "device": "cuda",
+    "log_interval": 1000,
+    "output_level": "standard",
+    "strict_physics": true
+  },
+  "physics": {
+    "scope": "paper_shared_detour_fft_plus_spatial_PP; wide_angle_scalar_layout",
+    "source": "paper Eq.(1), Fig.3e; PP extension and revised order selection approved by user",
+    "wavelength_nm": 532.0,
+    "period_x_nm": 1333.458,
+    "period_y_nm": 1333.458,
+    "n_in": 1.0,
+    "n_out": 1.0,
+    "na": 1.0,
+    "incident_theta_deg": 0.0,
+    "incident_azimuth_deg": 0.0,
+    "common_incidence": true,
+    "nominal_cell_half_diagonal_u": 0.28210922848056946,
+    "support_definition": "Exact nonzero target pixels at fftshift bins, x right/u+, rows down/v-",
+    "device_configuration_verified": false,
+    "layout_requirements": {
+      "reference": "input/order_layout_25.png",
+      "max_order_count": 25,
+      "ring_theta_deg": 84.0,
+      "minimum_ring_coverage": 0.9191
+    },
+    "strict_require": [
+      "order_count",
+      "ring_coverage",
+      "all_cells_intersect_propagation",
+      "actual_target_support"
+    ]
+  }
+}

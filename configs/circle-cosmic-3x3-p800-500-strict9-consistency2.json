@@ -1,0 +1,58 @@
+{
+  "name": "circle-cosmic-3x3-p800-500-strict9-consistency2",
+  "claim_scope": "shared_detour_fft_plus_spatial_PP; scalar_software_and_common_incidence_geometry",
+  "optimizer": {
+    "mat_file": "output/targets/circle_cosmic_strict9_3x3_p800_gray256_500/target.mat",
+    "optimizer_name": "adam",
+    "epochs": 10000,
+    "lr": 0.0003,
+    "seed": 43,
+    "gray_level_count": 256,
+    "device": "auto",
+    "log_interval": 500,
+    "strict_physics": true,
+    "gray_consistency_weight": 2.0,
+    "initial_results": "output/data/circle-cosmic-3x3-p800-500-strict9-adam-25000"
+  },
+  "physics": {
+    "scope": "user_screenshot_grid_plus_shared_PP; scalar_geometry_only",
+    "source": "User screenshot: 3x3 orders starting at (-2,-2), P=800 nm, theta=70.1276 deg, phi=45 deg",
+    "wavelength_nm": 532.0,
+    "period_x_nm": 800,
+    "period_y_nm": 800,
+    "n_in": 1.0,
+    "n_out": 1.0,
+    "na": 1.0,
+    "incident_theta_deg": 70.1276,
+    "incident_azimuth_deg": 45,
+    "common_incidence": true,
+    "device_configuration_verified": false,
+    "layout_requirements": {
+      "max_order_count": 9
+    },
+    "strict_require": [
+      "order_count",
+      "all_cells_intersect_propagation",
+      "actual_target_support"
+    ],
+    "square_target_scope": "Only the requested central nine orders are optimized. The same source-circle mapping is retained; the four outer caps are unconstrained. Full-plane metrics remain unchanged within each selected order."
+  },
+  "target": {
+    "source": "input/circle_cosmic_gray.png",
+    "tile_size": 500,
+    "grid_size": 3,
+    "order_m_start": -2,
+    "order_n_start": -2,
+    "excluded_canvas_positions": [],
+    "source_circle": {
+      "center_px": [
+        625.1027,
+        621.1985
+      ],
+      "radius_px": 620.35,
+      "outside_background_max_gray": 2
+    },
+    "layout_label": "Strict 3 x 3 (9 orders)",
+    "require_full_field_coverage": false
+  }
+}

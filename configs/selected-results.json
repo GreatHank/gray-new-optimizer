@@ -1,0 +1,135 @@
+{
+  "老虎/严格3×3（9级次）_500×500_25000步_P800_完整原图_ADAM_seed43_20261001-135417.png": {
+    "data_dir": "output/data/tiger-3x3-p800-500-adam-25000",
+    "source": "input/tiger_detailed.png",
+    "description": "严格3×3（9级次）_500×500_25000步_P800_完整原图_ADAM_seed43",
+    "snr_mean_db": 16.46869225074491,
+    "metric_scope": "full_plane"
+  },
+  "老虎/4×4（16级次）_500×500_25000步_P1050_完整原图_ADAM_seed43_20261001-140054.png": {
+    "data_dir": "output/data/tiger-4x4-p1050-500-adam-25000",
+    "source": "input/tiger_detailed.png",
+    "description": "4×4（16级次）_500×500_25000步_P1050_完整原图_ADAM_seed43",
+    "snr_mean_db": 12.517233011300533,
+    "metric_scope": "full_plane"
+  },
+  "老虎/严格3×3（9级次）_500×500_25000步_P800_完整原图_圆内约束_ADAM_seed43_20261002-162952.png": {
+    "data_dir": "output/data/tiger-3x3-p800-500-observable-500x500-adam-25000steps-20261002-162639",
+    "source": "input/tiger_detailed.png",
+    "description": "严格3×3（9级次）_500×500_25000步_P800_完整原图_圆内约束_ADAM_seed43",
+    "snr_mean_db": 18.21659097549626,
+    "metric_scope": "observable"
+  },
+  "老虎/4×4（16级次）_500×500_25000步_P1050_完整原图_圆内约束_ADAM_seed43_20261002-165627.png": {
+    "data_dir": "output/data/tiger-4x4-p1050-500-observable-500x500-adam-25000steps-20261002-164948",
+    "source": "input/tiger_detailed.png",
+    "description": "4×4（16级次）_500×500_25000步_P1050_完整原图_圆内约束_ADAM_seed43",
+    "snr_mean_db": 13.8801379651883,
+    "metric_scope": "observable"
+  },
+  "圆形星空/严格3×3（9级次）_500×500_25000步_P800_视场圆映射_ADAM_seed43_20261001-191411.png": {
+    "data_dir": "output/data/circle-cosmic-3x3-p800-500-strict9-adam-25000",
+    "source": "input/circle_cosmic_gray.png",
+    "description": "严格3×3（9级次）_500×500_25000步_P800_视场圆映射_ADAM_seed43",
+    "snr_mean_db": 13.51912870463814,
+    "metric_scope": "full_plane"
+  },
+  "圆形星空/4×4（16级次）_500×500_25000步_P1050_视场圆映射_ADAM_seed43_20261001-151935.png": {
+    "data_dir": "output/data/circle-cosmic-4x4-p1050-500-fullcircle-adam-25000",
+    "source": "input/circle_cosmic_gray.png",
+    "description": "4×4（16级次）_500×500_25000步_P1050_视场圆映射_ADAM_seed43",
+    "snr_mean_db": 9.699160081178992,
+    "metric_scope": "full_plane"
+  },
+  "圆形星空/严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43_20261002-163402.png": {
+    "data_dir": "output/data/circle-cosmic-3x3-p800-500-strict9-observable-500x500-adam-25000steps-20261002-163108",
+    "source": "input/circle_cosmic_gray.png",
+    "description": "严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43",
+    "snr_mean_db": 15.854868056781704,
+    "metric_scope": "observable"
+  },
+  "圆形星空/4×4（16级次）_500×500_25000步_P1050_视场圆映射_圆内约束_ADAM_seed43_20261002-170401.png": {
+    "data_dir": "output/data/circle-cosmic-4x4-p1050-500-fullcircle-observable-500x500-adam-25000steps-20261002-165745",
+    "source": "input/circle_cosmic_gray.png",
+    "description": "4×4（16级次）_500×500_25000步_P1050_视场圆映射_圆内约束_ADAM_seed43",
+    "snr_mean_db": 10.69877728751955,
+    "metric_scope": "observable"
+  },
+  "乌龟/严格3×3（9级次）_500×500_25000步_P800_视场圆映射_ADAM_seed43_20261001-162811.png": {
+    "data_dir": "output/data/circle-ocean-3x3-p800-500-strict9-adam-25000",
+    "source": "input/circle_ocean_gray.png",
+    "description": "严格3×3（9级次）_500×500_25000步_P800_视场圆映射_ADAM_seed43",
+    "snr_mean_db": 13.592325268998353,
+    "metric_scope": "full_plane"
+  },
+  "乌龟/4×4（16级次）_500×500_25000步_P1050_视场圆映射_ADAM_seed43_20261001-160523.png": {
+    "data_dir": "output/data/circle-ocean-4x4-p1050-500-fullcircle-adam-25000",
+    "source": "input/circle_ocean_gray.png",
+    "description": "4×4（16级次）_500×500_25000步_P1050_视场圆映射_ADAM_seed43",
+    "snr_mean_db": 10.003719115077475,
+    "metric_scope": "full_plane"
+  },
+  "乌龟/严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43_20261002-160306.png": {
+    "data_dir": "output/data/circle-ocean-3x3-p800-500-strict9-observable-500x500-adam-25000steps-20261002-155938",
+    "source": "input/circle_ocean_gray.png",
+    "description": "严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43",
+    "snr_mean_db": 15.02196388641179,
+    "metric_scope": "observable"
+  },
+  "乌龟/4×4（16级次）_500×500_25000步_P1050_视场圆映射_圆内约束_ADAM_seed43_20261002-171108.png": {
+    "data_dir": "output/data/circle-ocean-4x4-p1050-500-fullcircle-observable-500x500-adam-25000steps-20261002-170442",
+    "source": "input/circle_ocean_gray.png",
+    "description": "4×4（16级次）_500×500_25000步_P1050_视场圆映射_圆内约束_ADAM_seed43",
+    "snr_mean_db": 11.04934529445108,
+    "metric_scope": "observable"
+  },
+  "山涧/严格3×3（9级次）_500×500_25000步_P800_视场圆映射_ADAM_seed43_20261001-163120.png": {
+    "data_dir": "output/data/circle-forest-3x3-p800-500-strict9-adam-25000",
+    "source": "input/circle_forest_gray.png",
+    "description": "严格3×3（9级次）_500×500_25000步_P800_视场圆映射_ADAM_seed43",
+    "snr_mean_db": 13.72678691756228,
+    "metric_scope": "full_plane"
+  },
+  "山涧/4×4（16级次）_500×500_25000步_P1050_视场圆映射_ADAM_seed43_20261001-161656.png": {
+    "data_dir": "output/data/circle-forest-4x4-p1050-500-fullcircle-adam-25000",
+    "source": "input/circle_forest_gray.png",
+    "description": "4×4（16级次）_500×500_25000步_P1050_视场圆映射_ADAM_seed43",
+    "snr_mean_db": 10.285414074194847,
+    "metric_scope": "full_plane"
+  },
+  "山涧/严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43_20261002-163713.png": {
+    "data_dir": "output/data/circle-forest-3x3-p800-500-strict9-observable-500x500-adam-25000steps-20261002-163417",
+    "source": "input/circle_forest_gray.png",
+    "description": "严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43",
+    "snr_mean_db": 15.408141036084507,
+    "metric_scope": "observable"
+  },
+  "山涧/4×4（16级次）_500×500_25000步_P1050_视场圆映射_圆内约束_ADAM_seed43_20261002-171756.png": {
+    "data_dir": "output/data/circle-forest-4x4-p1050-500-fullcircle-observable-500x500-adam-25000steps-20261002-171134",
+    "source": "input/circle_forest_gray.png",
+    "description": "4×4（16级次）_500×500_25000步_P1050_视场圆映射_圆内约束_ADAM_seed43",
+    "snr_mean_db": 11.457851313107739,
+    "metric_scope": "observable"
+  },
+  "牡丹/严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43_20261003-002345.png": {
+    "data_dir": "output/data/circle-peony-3x3-p800-500-strict9-observable-500x500-adam-25000steps-20261003-002048",
+    "source": "input/circle_peony_gray.png",
+    "description": "严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43",
+    "snr_mean_db": 16.923834339994286,
+    "metric_scope": "observable"
+  },
+  "盘龙/严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43_20261003-002723.png": {
+    "data_dir": "output/data/circle-dragon-3x3-p800-500-strict9-observable-500x500-adam-25000steps-20261003-002422",
+    "source": "input/circle_dragon_gray.png",
+    "description": "严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43",
+    "snr_mean_db": 15.839657493072856,
+    "metric_scope": "observable"
+  },
+  "凤凰/严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43_20261003-003102.png": {
+    "data_dir": "output/data/circle-phoenix-3x3-p800-500-strict9-observable-500x500-adam-25000steps-20261003-002802",
+    "source": "input/circle_phoenix_gray.png",
+    "description": "严格3×3（9级次）_500×500_25000步_P800_视场圆映射_圆内约束_ADAM_seed43",
+    "snr_mean_db": 15.823364543649838,
+    "metric_scope": "observable"
+  }
+}

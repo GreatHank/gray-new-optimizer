@@ -1,0 +1,13 @@
+{
+  "name": "cpu-smoke",
+  "optimizer": {
+    "mat_file": "output/targets/zero_order_smoke/target.mat",
+    "epochs": 1,
+    "lr": 0.0005,
+    "seed": 42,
+    "device": "cpu",
+    "log_interval": 1,
+    "strict_physics": false,
+    "gray_level_count": 4
+  }
+}

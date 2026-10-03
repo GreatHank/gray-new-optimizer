@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="本地球面图像观测工具：上传平面图，旋转查看球面与球心视角。">
+  <title>球面图像观测台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='11' fill='%230e242b'/%3E%3Ccircle cx='20' cy='20' r='13' fill='none' stroke='%238bd4bd' stroke-width='2'/%3E%3Cellipse cx='20' cy='20' rx='6' ry='13' fill='none' stroke='%238bd4bd'/%3E%3Cpath d='M7 20h26' stroke='%238bd4bd'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script src="campus-example.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="14"/><ellipse cx="20" cy="20" rx="6" ry="14"/><ellipse cx="20" cy="20" rx="14" ry="5"/></svg>
+        <div><p class="eyebrow">SPHERICAL IMAGE LAB</p><h1>球面图像观测台</h1></div>
+      </div>
+      <div class="header-right"><a href="../order_visualizer/index.html">级次视场工具 <span aria-hidden="true">↗</span></a><span class="local-badge"><i></i> 本地处理 · 图片不上传</span></div>
+    </header>
+
+    <div class="intro"><div><h2>站在圆心，仰望整个穹顶。</h2><p>天空在头顶，建筑围在身旁；拖动转头，环顾四周。</p></div><span class="intro-index">01 / DOME VIEWER</span></div>
+
+    <div class="workspace">
+      <aside class="control-panel" aria-label="图像与观察设置">
+        <section class="control-section">
+          <div class="section-heading"><span class="step">01</span><h3>载入图像</h3></div>
+          <label class="upload-box" id="uploadBox" for="imageInput">
+            <input type="file" id="imageInput" accept="image/png,image/jpeg,image/webp,image/bmp">
+            <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 21V6m-6 6 6-6 6 6M6 21v5h20v-5"/></svg>
+            <strong>点击选择，或拖入图片</strong><span>PNG / JPG / WEBP / BMP</span>
+          </label>
+          <div class="file-meta"><span id="fileName">尚未载入图片</span><small id="imageSize">—</small></div>
+          <button id="demoButton" class="text-button" type="button">试试坐标示例 <span aria-hidden="true">↗</span></button>
+          <button id="campusButton" class="text-button" type="button">载入武大黑天穹顶 <span aria-hidden="true">↗</span></button>
+          <p id="errorMessage" class="error-message" role="alert" aria-live="polite"></p>
+        </section>
+
+        <section class="control-section">
+          <div class="section-heading"><span class="step">02</span><h3>球面映射</h3></div>
+          <div id="mappingDescription" class="mapping-note">映射方式待确认</div>
+          <label class="projection-field" for="projection">素材类型<select id="projection"><option value="angular">穹顶全景贴图</option><option value="direction">衍射圆图</option></select></label>
+          <div class="range-field"><label for="coverage">穹顶覆盖 <output id="coverageValue">180°</output></label><input id="coverage" type="range" min="20" max="180" step="1" value="180"><div class="range-extents"><span>20°</span><span>180° · 完整穹顶</span></div></div>
+          <details class="source-settings" id="sourceSettings"><summary>调整原图圆形区域</summary><p>在下方原图上点击圆心，再调整半径。包含标题或边框的图片需要先定位图像圆。</p><div class="number-grid"><label>圆心 X <input id="centerX" type="number" step="0.1" value="0"></label><label>圆心 Y <input id="centerY" type="number" step="0.1" value="0"></label><label class="wide">圆半径 / 像素 <input id="sourceRadius" type="number" min="0.1" step="0.1" value="1"></label></div><button id="fitCircle" class="text-button" type="button">恢复居中内切圆</button></details>
+        </section>
+
+        <section class="control-section last-section">
+          <div class="section-heading"><span class="step">03</span><h3>观察方式</h3></div>
+          <div class="segmented" role="group" aria-label="观察方式"><button id="insideButton" aria-pressed="true" type="button">沉浸环顾</button><button id="overviewButton" aria-pressed="false" type="button">全景仰视</button><button id="outsideButton" aria-pressed="false" type="button">穹顶外观</button></div>
+          <p class="view-description" id="viewDescription">绕球面旋转，查看图像的立体展开。</p>
+          <label class="toggle-row" for="autoRotate"><span>自动环绕</span><input id="autoRotate" type="checkbox" role="switch"></label>
+          <label class="toggle-row" for="showGrid"><span>经纬参考线</span><input id="showGrid" type="checkbox" role="switch"></label>
+          <div class="range-field"><label for="rotationSpeed">环绕速度 <output id="speedValue">8° / 秒</output></label><input id="rotationSpeed" type="range" min="1" max="25" step="1" value="8"></div>
+        </section>
+        <div class="panel-actions"><button class="button" id="resetView" type="button">视角复位</button><button class="button primary" id="exportButton" type="button">保存当前视图 <span aria-hidden="true">↓</span></button></div>
+      </aside>
+
+      <section class="viewer-panel" aria-label="球面空间预览">
+        <div class="scene" id="scene">
+          <canvas id="sceneCanvas" aria-label="可拖动旋转的球面图像，滚轮缩放，方向键转动视角" tabindex="0"></canvas>
+          <div class="scene-top"><span class="scene-label"><i></i> LIVE VIEW</span><div class="view-presets"><button id="frontView" type="button" class="active">头顶</button><button id="obliqueView" type="button">斜视</button><button id="sideView" type="button">周围</button><button id="expandView" type="button" aria-pressed="false">大屏观赏</button></div></div>
+          <div class="empty-state" id="emptyState"><span class="empty-orbit" aria-hidden="true">◎</span><h3>你的图像，即将拥有新的视角</h3><p>从左侧载入图片，或打开坐标示例</p><button id="emptyDemo" type="button">探索示例 <span aria-hidden="true">→</span></button></div>
+          <div class="scene-mode"><span id="modeLabel">底面圆心 · 仰望穹顶</span><small id="projectionLabel">穹顶空间</small></div>
+          <div class="scene-bottom"><span id="interactionHint">拖动旋转 <b>·</b> 滚轮缩放 <b>·</b> 方向键微调</span><div class="zoom-buttons"><button id="zoomOut" aria-label="缩小视图" type="button">−</button><span id="zoomValue">1.0×</span><button id="zoomIn" aria-label="放大视图" type="button">+</button></div></div>
+          <p id="sceneNotice" class="scene-notice" role="status" hidden></p>
+        </div>
+        <div class="readout-strip"><div><span>当前视角</span><strong id="viewReadout">方位 0° · 仰角 0°</strong></div><div><span>映射视场</span><strong id="fieldReadout">180°</strong></div><div><span>图像显示</span><strong>原图亮度 · 1×</strong></div><span class="readout-icon" aria-hidden="true">◉</span></div>
+      </section>
+    </div>
+
+    <section class="reference-row">
+      <article class="source-card"><div class="reference-title"><span class="step">↗</span><div><h3>平面参考图</h3><p>圆形边界与球面一一对应</p></div><span class="mini-tag">SOURCE</span></div><div class="source-stage"><canvas id="sourceCanvas" aria-label="原图与圆形映射区域，点击可设定圆心"></canvas><p id="sourcePlaceholder">载入后在这里对照原图</p></div><p class="source-caption" id="sourceCaption">原始图像仅用于显示，不修改文件。</p></article>
+      <article class="guide-card"><span class="eyebrow">A DIFFERENT PERSPECTIVE</span><h3>从平面，到球面。</h3><p id="mappingHelp">确认映射方式后，这里会显示图像与球面方向的对应关系。</p><div class="guide-steps"><div><span>01</span><p>选择图像<br><small>本地载入，无需上传</small></p></div><div><span>02</span><p>转动观察<br><small>球外与球心视角</small></p></div><div><span>03</span><p>保存画面<br><small>导出当前角度 PNG</small></p></div></div><div class="scope-note">用于球面几何展示，不重算衍射、强度或评价指标。</div></article>
+    </section>
+    <footer><span>SPHERICAL IMAGE LAB <b> / </b> 球面图像观测台</span><span>浏览器内完成全部处理</span></footer>
+  </main>
+</body>
+</html>
